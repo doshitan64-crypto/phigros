@@ -1,0 +1,2484 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Phigros 譜面シミュレーター (日本語版)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip (ZIPファイルの一括解凍・読み込み用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Google Fonts: Noto Sans JP & Rajdhani -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --phi-cyan: #00f0ff;
+            --phi-gold: #ffd700;
+            --phi-pink: #ff2a6d;
+            --phi-bg: #070b14;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--phi-bg);
+            color: #f8fafc;
+            font-family: 'Noto Sans JP', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        .font-cyber {
+            font-family: 'Rajdhani', 'Noto Sans JP', sans-serif;
+        }
+
+        /* 幾何学カットアウト */
+        .phi-cut {
+            clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+        }
+
+        /* 背景グリッドアニメーション */
+        .bg-grid {
+            background-size: 40px 40px;
+            background-image: 
+                linear-gradient(to right, rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+        }
+
+        /* カスタムレンジスライダー */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.15);
+            height: 6px;
+            border-radius: 999px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--phi-cyan);
+            cursor: pointer;
+            box-shadow: 0 0 10px var(--phi-cyan);
+            transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:active {
+            transform: scale(1.25);
+        }
+
+        /* ドロップオーバーレイのパルスアニメーション */
+        @keyframes borderPulse {
+            0%, 100% { border-color: rgba(0, 240, 255, 0.85); box-shadow: inset 0 0 40px rgba(0, 240, 255, 0.25); }
+            50% { border-color: rgba(255, 215, 0, 0.95); box-shadow: inset 0 0 60px rgba(255, 215, 0, 0.3); }
+        }
+        .drop-active-box {
+            animation: borderPulse 1.5s infinite ease-in-out;
+        }
+
+        /* カスタムスクロールバー */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.2);
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: rgba(0, 240, 255, 0.4);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-grid relative flex items-center justify-center">
+
+    <!-- 画面全体ドラッグ＆ドロップ オーバーレイ (iPad Split View / Android / PCドラッグ対応) -->
+    <div id="dropOverlay" class="fixed inset-0 z-50 hidden bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 pointer-events-none transition-opacity duration-200">
+        <div class="drop-active-box w-full h-full border-4 border-dashed border-cyan-400 rounded-3xl flex flex-col items-center justify-center text-center p-8">
+            <div class="w-24 h-24 mb-6 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_30px_rgba(0,240,255,0.4)]">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+            </div>
+            <h2 class="text-2xl sm:text-4xl font-black tracking-wider text-white mb-3">ここにファイルをドロップして読み込み</h2>
+            <p class="text-cyan-300 text-base sm:text-lg font-medium max-w-xl">
+                譜面 (.json / .pec)、楽曲 (.mp3 / .ogg / .wav)、背景画像 (.png / .jpg)、<br>
+                またはこれらをまとめた <span class="text-amber-300 font-bold">.zip ファイル</span> を一括でドロップできます
+            </p>
+        </div>
+    </div>
+
+    <!-- トースト通知エリア (alert()の代替) -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full px-4 sm:px-0"></div>
+
+    <!-- メインゲームコンテナ (16:9 レスポンシブ維持) -->
+    <div id="appWrapper" class="relative w-full h-full flex items-center justify-center overflow-hidden">
+        <!-- 16:9 Canvas -->
+        <canvas id="gameCanvas" class="block shadow-2xl bg-slate-950"></canvas>
+
+        <!-- ゲームプレイ中の上部HUDオーバーレイ -->
+        <div id="hudOverlay" class="hidden absolute top-0 left-0 right-0 p-3 sm:p-5 flex justify-between items-start pointer-events-none z-20">
+            <!-- 左上: 一時停止 & 全画面ボタン -->
+            <div class="flex items-center gap-2 pointer-events-auto">
+                <button id="pauseBtn" class="p-3 rounded-xl bg-slate-900/75 hover:bg-cyan-950/90 border border-white/20 hover:border-cyan-400 text-white backdrop-blur-sm transition active:scale-95 flex items-center gap-2 shadow-lg" title="一時停止 (Esc)">
+                    <svg class="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                    </svg>
+                    <span class="hidden sm:inline text-xs font-bold tracking-wider">一時停止</span>
+                </button>
+                <button class="fullscreenToggleBtn p-3 rounded-xl bg-slate-900/75 hover:bg-cyan-950/90 border border-white/20 hover:border-cyan-400 text-white backdrop-blur-sm transition active:scale-95 flex items-center gap-1.5 shadow-lg" title="全画面表示切替">
+                    <svg class="w-5 h-5 text-cyan-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                    </svg>
+                    <span class="fsBtnLabel hidden md:inline text-xs font-bold tracking-wider">全画面</span>
+                </button>
+            </div>
+
+            <!-- 右上: オートプレイ表示バッジ（有効時） -->
+            <div id="autoBadge" class="hidden px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/70 text-amber-300 text-xs sm:text-sm font-bold tracking-widest backdrop-blur-sm shadow-[0_0_15px_rgba(255,215,0,0.3)]">
+                AUTO PLAY 稼働中
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         1. メインメニュー（ファイル読み込み・設定画面）
+    ========================================================= -->
+    <div id="mainMenu" class="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md">
+        <div class="w-full max-w-5xl bg-slate-900/95 border border-cyan-500/30 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col max-h-[95vh]">
+            
+            <!-- ヘッダーバー -->
+            <div class="px-5 py-4 sm:px-7 sm:py-5 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <div class="w-3 h-8 bg-cyan-400 rounded-sm shadow-[0_0_12px_#00f0ff]"></div>
+                    <div>
+                        <h1 class="text-xl sm:text-2xl font-black tracking-wider text-white flex items-center gap-2">
+                            PHIGROS SIMULATOR
+                            <span class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-bold">日本語版</span>
+                        </h1>
+                        <p class="text-xs text-slate-400">画面ドロップ・マルチタッチ・Arcaea式音ズレ調整対応 譜面模擬器</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <!-- 全画面ボタン -->
+                    <button class="fullscreenToggleBtn px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-cyan-950 border border-cyan-500/40 text-xs sm:text-sm font-bold text-cyan-300 flex items-center gap-1.5 transition active:scale-95">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                        </svg>
+                        <span class="fsBtnLabel">全画面</span>
+                    </button>
+                    <!-- 操作ガイド -->
+                    <button id="openGuideBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-xs sm:text-sm font-bold text-slate-200 flex items-center gap-1.5 transition active:scale-95">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        操作ガイド
+                    </button>
+                </div>
+            </div>
+
+            <!-- コンテンツボディ (2カラムレスポンシブ) -->
+            <div class="p-5 sm:p-7 overflow-y-auto custom-scroll grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                <!-- 左カラム: ファイル読み込み・楽曲情報 (7カラム) -->
+                <div class="lg:col-span-7 flex flex-col gap-4">
+                    
+                    <!-- タブレット＆PC対応 ドロップゾーンカード -->
+                    <div id="menuDropZone" class="relative group rounded-2xl border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/60 p-5 text-center transition-all cursor-pointer">
+                        <input type="file" id="fileInput" multiple accept=".json,.pec,.mp3,.ogg,.wav,.m4a,.png,.jpg,.jpeg,.webp,.zip,.txt,.csv" class="hidden">
+                        <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
+                        
+                        <div class="flex flex-col items-center justify-center">
+                            <div class="w-12 h-12 mb-3 rounded-xl bg-cyan-500/15 border border-cyan-400/40 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                                </svg>
+                            </div>
+                            <p class="text-sm sm:text-base font-bold text-white mb-1">
+                                画面のどこにでもファイルをドロップして読み込み
+                            </p>
+                            <p class="text-xs text-slate-400 mb-4">
+                                iPadのSplit Viewからのドロップ、またはボタンから譜面・音源・ZIPを選択してください
+                            </p>
+                            <div class="flex flex-wrap items-center justify-center gap-2.5 w-full">
+                                <button type="button" id="selectFilesBtn" class="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs sm:text-sm shadow-[0_0_15px_rgba(0,240,255,0.3)] transition active:scale-95 flex items-center gap-1.5">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                    ファイル / ZIP を選択
+                                </button>
+                                <button type="button" id="selectFolderBtn" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-xs sm:text-sm transition active:scale-95 flex items-center gap-1.5">
+                                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+                                    フォルダを選択
+                                </button>
+                                <button type="button" id="clearAssetsBtn" class="px-3.5 py-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-200 font-bold text-xs sm:text-sm transition active:scale-95">
+                                    クリア
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 読み込み済みアセット状況ステータス -->
+                    <div class="bg-slate-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-3">
+                        <div class="flex items-center justify-between border-b border-white/10 pb-2">
+                            <span class="text-xs font-bold text-slate-400 tracking-wider">読み込みステータス</span>
+                            <span id="readyStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/40 font-bold">譜面と音源を読み込んでください</span>
+                        </div>
+
+                        <!-- 楽曲タイトル＆難易度編集 -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div class="sm:col-span-2">
+                                <label class="block text-[11px] text-slate-400 mb-1">楽曲タイトル</label>
+                                <input type="text" id="songTitleInput" placeholder="楽曲を読み込むと自動入力されます" value="" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-white/15 text-sm font-bold text-white focus:border-cyan-400 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">難易度表記</label>
+                                <input type="text" id="difficultyInput" value="IN Lv.15" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-white/15 text-sm font-bold text-cyan-300 focus:border-cyan-400 outline-none">
+                            </div>
+                        </div>
+
+                        <!-- 3つのファイルスロット表示 -->
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                            <!-- 譜面 -->
+                            <div id="chartSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-xs font-bold text-cyan-400">譜面データ <span class="text-rose-400">*必須</span></span>
+                                    <span id="chartStatusDot" class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                                </div>
+                                <p id="chartFileName" class="text-xs text-slate-400 truncate font-medium">未読み込み (.json / .pec)</p>
+                                <p id="noteCountText" class="text-[11px] text-slate-500 mt-0.5">総ノーツ数: -</p>
+                            </div>
+                            <!-- 音源 -->
+                            <div id="audioSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-xs font-bold text-amber-400">楽曲音源 <span class="text-rose-400">*必須</span></span>
+                                    <span id="audioStatusDot" class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                                </div>
+                                <p id="audioFileName" class="text-xs text-slate-400 truncate font-medium">未読み込み (.mp3 / .ogg / .wav)</p>
+                                <p id="audioDurationText" class="text-[11px] text-slate-500 mt-0.5">再生時間: --:--</p>
+                            </div>
+                            <!-- 背景イラスト -->
+                            <div id="bgSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col justify-between transition-colors">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-xs font-bold text-pink-400">背景イラスト <span class="text-slate-500">(任意)</span></span>
+                                    <span id="bgStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                                </div>
+                                <p id="bgFileName" class="text-xs text-slate-400 truncate font-medium">デフォルト幾何学背景</p>
+                                <p class="text-[11px] text-slate-500 mt-0.5">PNG / JPG 対応</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右カラム: プレイ設定・音ズレ調整・スタートボタン (5カラム) -->
+                <div class="lg:col-span-5 flex flex-col justify-between gap-4">
+                    <div class="bg-slate-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-3.5">
+                        <h3 class="text-xs font-bold text-cyan-300 tracking-wider border-b border-white/10 pb-2">譜面・判定設定</h3>
+
+                        <!-- Arcaea風 音ズレ調整ボタン＆現在値表示 -->
+                        <div class="p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30 flex items-center justify-between gap-2">
+                            <div>
+                                <span class="text-xs font-bold text-slate-200 block">音ズレ調整 (オフセット)</span>
+                                <span id="offsetValText" class="font-cyber text-lg font-black text-cyan-300">0 ms</span>
+                            </div>
+                            <button type="button" id="openCalibrationBtn" class="px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400 text-cyan-200 font-bold text-xs sm:text-sm transition active:scale-95 flex items-center gap-1.5 shadow-[0_0_12px_rgba(0,240,255,0.2)]">
+                                <svg class="w-4 h-4 text-cyan-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                音ズレ調整を開く
+                            </button>
+                        </div>
+
+                        <!-- ノーツサイズ倍率 -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-300 font-medium">ノーツサイズ倍率</span>
+                                <span id="noteScaleValText" class="font-cyber font-bold text-cyan-300">1.00x</span>
+                            </div>
+                            <input type="range" id="noteScaleSlider" min="0.6" max="1.5" step="0.05" value="1.0" class="w-full">
+                        </div>
+
+                        <!-- 背景の明るさ -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-300 font-medium">背景の明るさ</span>
+                                <span id="bgDimValText" class="font-cyber font-bold text-cyan-300">40%</span>
+                            </div>
+                            <input type="range" id="bgDimSlider" min="10" max="90" step="5" value="40" class="w-full">
+                        </div>
+
+                        <!-- 再生速度 -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-300 font-medium">再生速度 (練習用)</span>
+                                <span id="speedValText" class="font-cyber font-bold text-amber-300">1.00x</span>
+                            </div>
+                            <input type="range" id="speedSlider" min="0.5" max="1.5" step="0.05" value="1.0" class="w-full">
+                        </div>
+
+                        <!-- オートプレイ＆ヒット音トグル -->
+                        <div class="grid grid-cols-2 gap-2.5 pt-1">
+                            <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-white/10 cursor-pointer hover:border-amber-400/50 transition">
+                                <span class="text-xs font-bold text-slate-200">オートプレイ</span>
+                                <input type="checkbox" id="autoPlayToggle" class="w-4 h-4 accent-amber-400 rounded">
+                            </label>
+                            <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-white/10 cursor-pointer hover:border-cyan-400/50 transition">
+                                <span class="text-xs font-bold text-slate-200">ヒット音 (SE)</span>
+                                <input type="checkbox" id="hitSoundToggle" checked class="w-4 h-4 accent-cyan-400 rounded">
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- プレイ開始ボタン (譜面と音源の両方が読み込まれるまで無効化) -->
+                    <button id="startGameBtn" disabled class="phi-cut w-full py-4 px-6 bg-slate-800 text-slate-500 cursor-not-allowed font-black text-lg sm:text-xl tracking-widest transition transform flex items-center justify-center gap-3">
+                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        <span id="startBtnText">譜面と音源を読み込んでください</span>
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         2. Arcaea風 音ズレ調整（オーディオオフセットキャリブレーション）モーダル
+    ========================================================= -->
+    <div id="calibrationModal" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center p-3 sm:p-6">
+        <div class="w-full max-w-xl bg-slate-900 border border-cyan-400/50 rounded-2xl shadow-[0_0_50px_rgba(0,240,255,0.25)] overflow-hidden flex flex-col">
+            <!-- ヘッダー -->
+            <div class="px-6 py-4 bg-slate-950 border-b border-white/10 flex items-center justify-between">
+                <div>
+                    <h2 class="text-lg sm:text-xl font-black text-white tracking-wider flex items-center gap-2">
+                        音ズレ調整
+                        <span class="text-[11px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">AUDIO OFFSET</span>
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-0.5">メトロノームの音に合わせて下のパッドをタップ（またはSpaceキー）してください</p>
+                </div>
+                <button id="closeCalibrationBtn" class="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <!-- メイン計測エリア -->
+            <div class="p-5 sm:p-6 flex flex-col items-center gap-5">
+                
+                <!-- 4拍子ビートインジケーター -->
+                <div class="flex items-center justify-center gap-4">
+                    <div id="calBeat0" class="w-5 h-5 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
+                    <div id="calBeat1" class="w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
+                    <div id="calBeat2" class="w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
+                    <div id="calBeat3" class="w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
+                </div>
+
+                <!-- Arcaea風 EARLY / LATE タイミングメーター -->
+                <div class="w-full bg-slate-950/90 border border-white/10 rounded-2xl p-4">
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs font-black tracking-widest text-cyan-400">EARLY (早い)</span>
+                        <div class="text-center">
+                            <span id="calCurrentOffsetDisplay" class="font-cyber text-3xl sm:text-4xl font-black text-white">0 ms</span>
+                            <span id="calTapCountText" class="block text-[11px] text-slate-400">計測回数: 0 回</span>
+                        </div>
+                        <span class="text-xs font-black tracking-widest text-amber-400">LATE (遅い)</span>
+                    </div>
+
+                    <!-- タイミングバー (-150ms ~ +150ms) -->
+                    <div class="relative w-full h-10 bg-slate-900 rounded-xl border border-white/10 overflow-hidden flex items-center">
+                        <!-- 目盛り線 -->
+                        <div class="absolute inset-y-0 left-1/4 w-px bg-white/10"></div>
+                        <div class="absolute inset-y-0 left-3/4 w-px bg-white/10"></div>
+                        <!-- 中央 0ms 基準線 -->
+                        <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 bg-emerald-400 shadow-[0_0_10px_#34d399] z-10"></div>
+                        
+                        <!-- タップ履歴マーカー描画コンテナ -->
+                        <div id="calMarkersContainer" class="absolute inset-0 pointer-events-none"></div>
+
+                        <!-- 平均値インジケーター -->
+                        <div id="calAvgMarker" class="absolute top-1 bottom-1 w-2 -ml-1 rounded-full bg-white shadow-[0_0_12px_#ffffff] transition-all duration-150 z-20" style="left: 50%;"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] font-cyber text-slate-500 mt-1 px-1">
+                        <span>-150ms</span>
+                        <span>-75ms</span>
+                        <span class="text-emerald-400 font-bold">0ms</span>
+                        <span>+75ms</span>
+                        <span>+150ms</span>
+                    </div>
+                </div>
+
+                <!-- 大型タップパッド (Arcaea風の菱形・サイバーパッド) -->
+                <button type="button" id="calTapPad" class="w-full py-7 sm:py-8 rounded-2xl bg-gradient-to-b from-cyan-950/70 to-slate-950 hover:from-cyan-900/70 active:scale-[0.98] border-2 border-cyan-400/70 shadow-[0_0_25px_rgba(0,240,255,0.2)] flex flex-col items-center justify-center transition-transform cursor-pointer">
+                    <span class="text-lg sm:text-xl font-black text-white tracking-widest mb-1">リズムに合わせてタップ</span>
+                    <span id="calLastDeltaText" class="font-cyber text-xs font-bold text-cyan-300">タップして計測開始</span>
+                </button>
+
+                <!-- 手動微調整ボタン (-10 / -1 / リセット / +1 / +10) -->
+                <div class="w-full flex flex-wrap items-center justify-center gap-2">
+                    <button type="button" data-delta="-10" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-cyan-300 active:scale-95">-10ms</button>
+                    <button type="button" data-delta="-1" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-cyan-300 active:scale-95">-1ms</button>
+                    <button type="button" id="calResetBtn" class="px-4 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 font-bold text-xs sm:text-sm text-rose-200 active:scale-95">リセット</button>
+                    <button type="button" data-delta="1" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-amber-300 active:scale-95">+1ms</button>
+                    <button type="button" data-delta="10" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-amber-300 active:scale-95">+10ms</button>
+                </div>
+
+                <!-- 適用＆キャンセルボタン -->
+                <div class="w-full grid grid-cols-2 gap-3 pt-1">
+                    <button type="button" id="calCancelBtn" class="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-sm transition active:scale-95">
+                        キャンセル
+                    </button>
+                    <button type="button" id="calApplyBtn" class="py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-sm tracking-wider shadow-[0_0_20px_rgba(0,240,255,0.4)] transition active:scale-95">
+                        この値で適用する
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         3. 一時停止モーダル
+    ========================================================= -->
+    <div id="pauseModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-md bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 text-center shadow-2xl">
+            <h2 class="text-2xl font-black text-white tracking-wider mb-1">一時停止</h2>
+            <p id="pauseSongTitle" class="text-xs text-cyan-300 mb-6 truncate">-</p>
+
+            <div class="flex flex-col gap-3">
+                <button id="resumeBtn" class="w-full py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-base tracking-wider transition active:scale-95">
+                    プレイを再開する
+                </button>
+                <button id="retryBtn" class="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-white font-bold text-base tracking-wider transition active:scale-95">
+                    最初からやり直す (リトライ)
+                </button>
+                <button class="fullscreenToggleBtn w-full py-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-cyan-500/30 text-cyan-300 font-bold text-sm tracking-wider transition active:scale-95">
+                    <span class="fsBtnLabel">全画面表示切替</span>
+                </button>
+                <button id="backToMenuBtn" class="w-full py-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-200 font-bold text-base tracking-wider transition active:scale-95">
+                    選曲・読み込み画面へ戻る
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         4. リザルト画面（結果発表）
+    ========================================================= -->
+    <div id="resultModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-lg flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl bg-slate-900/95 border border-cyan-400/40 rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(0,240,255,0.2)]">
+            <!-- 上部バナー -->
+            <div class="px-6 py-4 bg-gradient-to-r from-slate-950 via-cyan-950/40 to-slate-950 border-b border-white/10 flex items-center justify-between">
+                <div>
+                    <span id="resultDiffBadge" class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-bold">IN Lv.15</span>
+                    <h2 id="resultSongTitle" class="text-lg sm:text-xl font-black text-white mt-1">-</h2>
+                </div>
+                <div id="resultClearType" class="px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-400 text-amber-300 font-cyber font-bold text-sm tracking-widest">
+                    FULL COMBO
+                </div>
+            </div>
+
+            <!-- スコア・ランク表示 -->
+            <div class="p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-around gap-6 border-b border-white/10">
+                <div class="relative w-32 h-32 rounded-2xl bg-slate-950 border-2 border-cyan-400/50 flex flex-col items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.25)]">
+                    <span class="text-[10px] text-slate-400 tracking-widest uppercase">RANK</span>
+                    <span id="resultRank" class="font-cyber text-6xl font-black text-amber-300 drop-shadow-[0_0_15px_rgba(255,215,0,0.6)]">φ</span>
+                </div>
+
+                <div class="text-center sm:text-left">
+                    <p class="text-xs text-slate-400 font-bold tracking-wider mb-1">TOTAL SCORE</p>
+                    <p id="resultScore" class="font-cyber text-4xl sm:text-5xl font-black text-white tracking-wider mb-3">0000000</p>
+                    <div class="flex flex-wrap justify-center sm:justify-start gap-4 text-sm">
+                        <div>
+                            <span class="text-slate-400 text-xs block">最大コンボ</span>
+                            <span id="resultMaxCombo" class="font-cyber font-bold text-cyan-300 text-lg">0</span>
+                        </div>
+                        <div>
+                            <span class="text-slate-400 text-xs block">精度 (ACC)</span>
+                            <span id="resultAccuracy" class="font-cyber font-bold text-emerald-300 text-lg">0.00%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 判定内訳 -->
+            <div class="px-6 py-4 bg-slate-950/60 grid grid-cols-4 gap-2 text-center">
+                <div class="p-2 rounded-xl bg-slate-900/80 border border-amber-400/20">
+                    <span class="block text-xs font-bold text-amber-300">PERFECT</span>
+                    <span id="resPerfect" class="font-cyber text-xl font-bold text-white">0</span>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-900/80 border border-cyan-400/20">
+                    <span class="block text-xs font-bold text-cyan-300">GOOD</span>
+                    <span id="resGood" class="font-cyber text-xl font-bold text-white">0</span>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-900/80 border border-purple-400/20">
+                    <span class="block text-xs font-bold text-purple-300">BAD</span>
+                    <span id="resBad" class="font-cyber text-xl font-bold text-white">0</span>
+                </div>
+                <div class="p-2 rounded-xl bg-slate-900/80 border border-rose-400/20">
+                    <span class="block text-xs font-bold text-rose-400">MISS</span>
+                    <span id="resMiss" class="font-cyber text-xl font-bold text-white">0</span>
+                </div>
+            </div>
+
+            <!-- ボタン -->
+            <div class="p-5 flex flex-col sm:flex-row gap-3">
+                <button id="resultRetryBtn" class="flex-1 py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-base tracking-wider transition active:scale-95">
+                    もう一度プレイ
+                </button>
+                <button id="resultMenuBtn" class="flex-1 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-white font-bold text-base tracking-wider transition active:scale-95">
+                    メニューへ戻る
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         5. 操作ガイド・対応ファイル形式モーダル
+    ========================================================= -->
+    <div id="guideModal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[88vh]">
+            <div class="px-6 py-4 bg-slate-950 border-b border-white/10 flex items-center justify-between">
+                <h2 class="text-lg font-black text-white">操作ガイド・対応ファイル形式</h2>
+                <button id="closeGuideBtn" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto custom-scroll space-y-5 text-sm text-slate-300 leading-relaxed">
+                <div>
+                    <h3 class="text-cyan-400 font-bold text-base mb-1.5">1. タブレット・PCでのファイル読み込み方法</h3>
+                    <ul class="list-disc list-inside space-y-1 text-slate-300">
+                        <li><strong class="text-white">画面全体ドロップ：</strong>iPadの「ファイル」アプリ等をSplit View（画面分割）やSlide Overで横に開き、譜面・音源・画像・ZIPファイルをこのブラウザ画面へ直接ドラッグ＆ドロップできます。</li>
+                        <li><strong class="text-white">一括読み込み (.zip)：</strong>譜面JSON/PEC、音源MP3/OGG、背景画像、info.txt/csvが入ったZIPファイルをそのままドロップすると自動で解析・セットします。</li>
+                        <li><strong class="text-white">プレイ開始条件：</strong>「譜面データ」と「楽曲音源」の両方が読み込まれるとプレイ開始ボタンが有効になります。</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h3 class="text-amber-400 font-bold text-base mb-1.5">2. Arcaea式 音ズレ調整の使い方</h3>
+                    <p>
+                        「音ズレ調整を開く」を押すと4拍子のメトロノーム音が鳴ります。音にぴったり合わせて中央のパッドをタップすると、自分のタップが音に対してどれだけ早いか（EARLY / マイナス）・遅いか（LATE / プラス）がリアルタイムで計測され、平均値が自動算出されます。
+                    </p>
+                </div>
+
+                <div>
+                    <h3 class="text-emerald-400 font-bold text-base mb-1.5">3. ノーツの種類と操作方法</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div class="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/30">
+                            <span class="font-bold text-cyan-300 block mb-0.5">Tap（水色ノーツ）</span>
+                            判定ラインに重なる瞬間に画面をタップ。
+                        </div>
+                        <div class="p-3 rounded-xl bg-slate-950/80 border border-amber-500/30">
+                            <span class="font-bold text-amber-300 block mb-0.5">Drag（黄色ノーツ）</span>
+                            判定ライン付近に指を置いておくだけで自動判定。
+                        </div>
+                        <div class="p-3 rounded-xl bg-slate-950/80 border border-blue-500/30">
+                            <span class="font-bold text-blue-300 block mb-0.5">Hold（長押しノーツ）</span>
+                            頭をタップし、帯が終わるまで指を押し続けます。
+                        </div>
+                        <div class="p-3 rounded-xl bg-slate-950/80 border border-pink-500/30">
+                            <span class="font-bold text-pink-400 block mb-0.5">Flick（赤/ピンクノーツ）</span>
+                            判定ラインに重なるタイミングで指を素早くスライドします。
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="px-6 py-3.5 bg-slate-950 border-t border-white/10 text-right">
+                <button id="closeGuideBtnBottom" class="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-sm">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * ============================================================================
+ * Phigros風リズムゲームシミュレーター (日本語版) コアエンジン
+ * ----------------------------------------------------------------------------
+ * - デモモードなし（ユーザー譜面 .json/.pec + 音源 .mp3/.ogg/.wav/.m4a 読み込み専用）
+ * - 画面全体ドラッグ＆ドロップ + JSZip解凍 + info.txt/info.csvメタデータ自動読込
+ * - 全画面表示切替 (Fullscreen API)
+ * - Arcaea式インタラクティブ音ズレ調整 (AudioContext高精度メトロノーム計測)
+ * ============================================================================
+ */
+
+// ----------------------------------------------------------------------------
+// 1. グローバル状態管理 & 設定
+// ----------------------------------------------------------------------------
+const AppState = {
+    isPlaying: false,
+    isPaused: false,
+    
+    // 楽曲メタデータ
+    title: "",
+    difficulty: "IN Lv.15",
+    
+    // パース済み譜面データ
+    chart: null,
+    chartFileName: "",
+    totalNotes: 0,
+    
+    // 音源・背景リソース
+    audioBuffer: null,
+    audioFileName: "",
+    audioDuration: 0,
+    bgImage: null,
+    bgFileName: "",
+    
+    // ユーザー設定
+    settings: {
+        offsetMs: 0,        // 判定オフセット (ms)
+        noteScale: 1.0,     // ノーツ幅倍率
+        bgBrightness: 0.4,  // 背景明るさ (0.1 - 0.9)
+        playbackRate: 1.0,  // 再生速度 (0.5 - 1.5)
+        autoPlay: false,    // オートプレイ
+        hitSound: true      // ヒット音有効
+    },
+
+    // プレイ中の統計・判定データ
+    stats: {
+        perfect: 0,
+        good: 0,
+        bad: 0,
+        miss: 0,
+        combo: 0,
+        maxCombo: 0,
+        score: 0
+    },
+
+    effects: [],
+    judgePopups: [],
+    pointers: new Map(),
+    activeKeys: new Set()
+};
+
+// ----------------------------------------------------------------------------
+// 2. Web Audio API サウンドエンジン（低遅延ヒット音＆楽曲再生）
+// ----------------------------------------------------------------------------
+class SoundEngine {
+    constructor() {
+        this.ctx = null;
+        this.sourceNode = null;
+        this.gainNode = null;
+        this.startTime = 0;
+        this.pauseOffset = 0;
+        this.isRunning = false;
+    }
+
+    init() {
+        if (!this.ctx) {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.ctx = new AudioCtx();
+        }
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+    }
+
+    async decodeAudio(arrayBuffer) {
+        this.init();
+        return await this.ctx.decodeAudioData(arrayBuffer);
+    }
+
+    // 低遅延シンセヒット音（外部音声ファイル不要）
+    playHitSound(type = 1) {
+        if (!AppState.settings.hitSound) return;
+        this.init();
+        const now = this.ctx.currentTime;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        if (type === 4) {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(1400, now);
+            osc.frequency.exponentialRampToValueAtTime(2800, now + 0.045);
+            gain.gain.setValueAtTime(0.28, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+        } else if (type === 2) {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1850, now);
+            osc.frequency.exponentialRampToValueAtTime(900, now + 0.03);
+            gain.gain.setValueAtTime(0.18, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+        } else {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1050, now);
+            osc.frequency.exponentialRampToValueAtTime(240, now + 0.045);
+            gain.gain.setValueAtTime(0.32, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        }
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.065);
+    }
+
+    async startMusic(offsetSec = 0) {
+        if (!AppState.audioBuffer) return;
+        this.stopMusic();
+        this.init();
+
+        const rate = AppState.settings.playbackRate;
+        this.sourceNode = this.ctx.createBufferSource();
+        this.sourceNode.buffer = AppState.audioBuffer;
+        this.sourceNode.playbackRate.value = rate;
+
+        this.gainNode = this.ctx.createGain();
+        this.gainNode.gain.value = 0.8;
+
+        this.sourceNode.connect(this.gainNode);
+        this.gainNode.connect(this.ctx.destination);
+
+        this.pauseOffset = offsetSec;
+        if (offsetSec < 0) {
+            const delay = Math.abs(offsetSec) / rate;
+            this.sourceNode.start(this.ctx.currentTime + delay, 0);
+            this.startTime = this.ctx.currentTime + delay;
+        } else {
+            this.sourceNode.start(0, offsetSec);
+            this.startTime = this.ctx.currentTime - (offsetSec / rate);
+        }
+        this.isRunning = true;
+    }
+
+    stopMusic() {
+        if (this.sourceNode) {
+            try { this.sourceNode.stop(); } catch (e) {}
+            this.sourceNode.disconnect();
+            this.sourceNode = null;
+        }
+        this.isRunning = false;
+    }
+
+    getCurrentTime() {
+        if (!this.isRunning || !this.ctx) return this.pauseOffset;
+        const rate = AppState.settings.playbackRate;
+        return (this.ctx.currentTime - this.startTime) * rate;
+    }
+}
+
+const soundEngine = new SoundEngine();
+
+// ----------------------------------------------------------------------------
+// 3. Arcaea風 音ズレ調整（オーディオオフセットキャリブレーション）エンジン
+// ----------------------------------------------------------------------------
+class OffsetCalibrator {
+    constructor() {
+        this.isActive = false;
+        this.bpm = 120;
+        this.beatInterval = 60 / this.bpm; // 0.5秒 (500ms)
+        this.startAudioTime = 0;
+        this.nextScheduleTime = 0;
+        this.beatIndex = 0;
+        this.timerId = null;
+        this.rafId = null;
+
+        this.samples = [];     // 計測されたデルタ配列 (ms)
+        this.tempOffsetMs = 0; // 現在表示中のオフセット値 (ms)
+    }
+
+    open() {
+        soundEngine.init();
+        this.tempOffsetMs = AppState.settings.offsetMs;
+        this.samples = [];
+        this.isActive = true;
+
+        this.updateUI();
+        document.getElementById('calMarkersContainer').innerHTML = '';
+        document.getElementById('calLastDeltaText').textContent = 'タップして計測開始';
+        document.getElementById('calibrationModal').classList.remove('hidden');
+
+        // メトロノーム開始
+        const now = soundEngine.ctx.currentTime;
+        this.startAudioTime = now + 0.15;
+        this.nextScheduleTime = this.startAudioTime;
+        this.beatIndex = 0;
+
+        this.timerId = setInterval(() => this.scheduleBeats(), 25);
+        this.rafId = requestAnimationFrame(() => this.updateVisualBeats());
+    }
+
+    close() {
+        this.isActive = false;
+        if (this.timerId) {
+            clearInterval(this.timerId);
+            this.timerId = null;
+        }
+        if (this.rafId) {
+            cancelAnimationFrame(this.rafId);
+            this.rafId = null;
+        }
+        document.getElementById('calibrationModal').classList.add('hidden');
+    }
+
+    // 先読みスケジューリングでWeb Audioクロックと完全に一致したビート音を鳴らす
+    scheduleBeats() {
+        if (!this.isActive || !soundEngine.ctx) return;
+        const lookahead = 0.12;
+        while (this.nextScheduleTime < soundEngine.ctx.currentTime + lookahead) {
+            const isAccent = (this.beatIndex % 4 === 0);
+            this.playClick(this.nextScheduleTime, isAccent);
+            this.nextScheduleTime += this.beatInterval;
+            this.beatIndex++;
+        }
+    }
+
+    playClick(time, isAccent) {
+        const ctx = soundEngine.ctx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(isAccent ? 1320 : 880, time);
+        osc.frequency.exponentialRampToValueAtTime(isAccent ? 660 : 440, time + 0.04);
+
+        gain.gain.setValueAtTime(isAccent ? 0.45 : 0.3, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.055);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(time);
+        osc.stop(time + 0.06);
+    }
+
+    updateVisualBeats() {
+        if (!this.isActive) return;
+        const now = soundEngine.ctx.currentTime;
+        const elapsed = now - this.startAudioTime;
+
+        if (elapsed >= 0) {
+            const totalBeats = Math.floor(elapsed / this.beatInterval);
+            const currentBeatInBar = totalBeats % 4;
+            const beatProgress = (elapsed % this.beatInterval) / this.beatInterval;
+
+            for (let i = 0; i < 4; i++) {
+                const dot = document.getElementById(`calBeat${i}`);
+                if (i === currentBeatInBar && beatProgress < 0.35) {
+                    dot.className = i === 0
+                        ? 'w-6 h-6 rounded-full bg-amber-400 shadow-[0_0_16px_#ffd700] scale-110 transition-all duration-75'
+                        : 'w-5 h-5 rounded-full bg-cyan-400 shadow-[0_0_14px_#00f0ff] scale-110 transition-all duration-75';
+                } else {
+                    dot.className = i === 0
+                        ? 'w-5 h-5 rounded-full bg-slate-800 border border-amber-400/40 transition-all duration-75'
+                        : 'w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75';
+                }
+            }
+        }
+        this.rafId = requestAnimationFrame(() => this.updateVisualBeats());
+    }
+
+    recordTap() {
+        if (!this.isActive || !soundEngine.ctx) return;
+        const tapTime = soundEngine.ctx.currentTime;
+        const elapsed = tapTime - this.startAudioTime;
+        if (elapsed < -0.25) return;
+
+        // 最も近いビート時刻との差分を計算 (正 = 遅い/LATE, 負 = 早い/EARLY)
+        const nearestBeatNum = Math.round(elapsed / this.beatInterval);
+        const nearestBeatTime = this.startAudioTime + nearestBeatNum * this.beatInterval;
+        const deltaMs = (tapTime - nearestBeatTime) * 1000;
+
+        // 極端な誤タップ（±220ms超）を除外
+        if (Math.abs(deltaMs) > 220) return;
+
+        this.samples.push(deltaMs);
+        if (this.samples.length > 24) {
+            this.samples.shift(); // 直近24回を保持
+        }
+
+        // 平均値を算出（四捨五入）
+        const sum = this.samples.reduce((a, b) => a + b, 0);
+        this.tempOffsetMs = Math.round(sum / this.samples.length);
+
+        // 今回の単発タップ表示
+        const sign = deltaMs > 0 ? '+' : '';
+        const label = Math.abs(deltaMs) < 8 ? 'JUST!' : (deltaMs < 0 ? 'EARLY' : 'LATE');
+        document.getElementById('calLastDeltaText').textContent = `直近タップ: ${sign}${Math.round(deltaMs)} ms (${label})`;
+
+        this.addMarker(deltaMs);
+        this.updateUI();
+    }
+
+    addMarker(deltaMs) {
+        const container = document.getElementById('calMarkersContainer');
+        // -150ms ~ +150ms を 0% ~ 100% にマッピング
+        const clamped = Math.max(-150, Math.min(150, deltaMs));
+        const pct = ((clamped + 150) / 300) * 100;
+
+        const marker = document.createElement('div');
+        marker.className = 'absolute top-2 bottom-2 w-1 -ml-0.5 rounded-full transition-opacity duration-500';
+        marker.style.left = `${pct}%`;
+        marker.style.backgroundColor = Math.abs(deltaMs) <= 15 ? '#34d399' : (deltaMs < 0 ? '#00f0ff' : '#fbbf24');
+        marker.style.opacity = '0.85';
+        container.appendChild(marker);
+
+        // 古いマーカーをフェードアウト
+        if (container.children.length > 16) {
+            container.removeChild(container.firstChild);
+        }
+    }
+
+    adjustManual(delta) {
+        this.tempOffsetMs = Math.max(-500, Math.min(500, this.tempOffsetMs + delta));
+        this.updateUI();
+    }
+
+    reset() {
+        this.samples = [];
+        this.tempOffsetMs = 0;
+        document.getElementById('calMarkersContainer').innerHTML = '';
+        document.getElementById('calLastDeltaText').textContent = 'リセットしました（タップして計測）';
+        this.updateUI();
+    }
+
+    apply() {
+        AppState.settings.offsetMs = this.tempOffsetMs;
+        const sign = this.tempOffsetMs > 0 ? '+' : '';
+        document.getElementById('offsetValText').textContent = `${sign}${this.tempOffsetMs} ms`;
+        showToast(`音ズレオフセットを ${sign}${this.tempOffsetMs} ms に設定しました`, 'success');
+        this.close();
+    }
+
+    updateUI() {
+        const sign = this.tempOffsetMs > 0 ? '+' : '';
+        document.getElementById('calCurrentOffsetDisplay').textContent = `${sign}${this.tempOffsetMs} ms`;
+        document.getElementById('calTapCountText').textContent = `計測回数: ${this.samples.length} 回`;
+
+        const clamped = Math.max(-150, Math.min(150, this.tempOffsetMs));
+        const pct = ((clamped + 150) / 300) * 100;
+        document.getElementById('calAvgMarker').style.left = `${pct}%`;
+    }
+}
+
+const calibrator = new OffsetCalibrator();
+
+// ----------------------------------------------------------------------------
+// 4. 譜面パーサー（Phigros公式JSON形式 & PEC形式）
+// ----------------------------------------------------------------------------
+class ChartParser {
+    static parseOfficialJSON(jsonObj) {
+        const formatVersion = jsonObj.formatVersion || 3;
+        const offset = jsonObj.offset || 0;
+        const judgeLines = [];
+        let totalNotes = 0;
+
+        (jsonObj.judgeLineList || []).forEach((line, lineIdx) => {
+            const bpm = line.bpm || 120;
+            const beatToSec = (t) => (t / 32) * (60 / bpm);
+
+            const speedEvents = (line.speedEvents || [{ startTime: 0, endTime: 999999, value: 1.0 }])
+                .map(e => ({
+                    startTime: beatToSec(e.startTime),
+                    endTime: beatToSec(e.endTime),
+                    value: e.value,
+                    floorPosition: e.floorPosition || 0
+                }))
+                .sort((a, b) => a.startTime - b.startTime);
+
+            let currentPos = 0;
+            for (let i = 0; i < speedEvents.length; i++) {
+                speedEvents[i].floorPosition = currentPos;
+                const dur = Math.max(0, speedEvents[i].endTime - speedEvents[i].startTime);
+                currentPos += dur * speedEvents[i].value;
+            }
+
+            const moveEvents = (line.judgeLineMoveEvents || [{ startTime: 0, endTime: 999999, start: 0.5, end: 0.5, start2: 0.2, end2: 0.2 }])
+                .map(e => {
+                    if (formatVersion === 1) {
+                        const sx = Math.floor(e.start / 1000) / 880;
+                        const sy = (e.start % 1000) / 520;
+                        const ex = Math.floor(e.end / 1000) / 880;
+                        const ey = (e.end % 1000) / 520;
+                        return {
+                            startTime: beatToSec(e.startTime),
+                            endTime: beatToSec(e.endTime),
+                            startX: sx, endX: ex,
+                            startY: sy, endY: ey
+                        };
+                    } else {
+                        return {
+                            startTime: beatToSec(e.startTime),
+                            endTime: beatToSec(e.endTime),
+                            startX: e.start, endX: e.end,
+                            startY: e.start2, endY: e.end2
+                        };
+                    }
+                });
+
+            const rotateEvents = (line.judgeLineRotateEvents || [{ startTime: 0, endTime: 999999, start: 0, end: 0 }])
+                .map(e => ({
+                    startTime: beatToSec(e.startTime),
+                    endTime: beatToSec(e.endTime),
+                    start: e.start,
+                    end: e.end
+                }));
+
+            const alphaEvents = (line.judgeLineDisappearEvents || [{ startTime: 0, endTime: 999999, start: 1, end: 1 }])
+                .map(e => ({
+                    startTime: beatToSec(e.startTime),
+                    endTime: beatToSec(e.endTime),
+                    start: e.start,
+                    end: e.end
+                }));
+
+            const notes = [];
+            const processNoteList = (rawList, isAbove) => {
+                (rawList || []).forEach(n => {
+                    const hitTime = beatToSec(n.time);
+                    const holdDur = n.type === 3 ? beatToSec(n.holdTime) : 0;
+                    const floorPos = this.calcFloorPosition(speedEvents, hitTime);
+                    const endFloorPos = n.type === 3 ? this.calcFloorPosition(speedEvents, hitTime + holdDur) : floorPos;
+
+                    notes.push({
+                        id: `${lineIdx}_${notes.length}`,
+                        type: n.type,
+                        time: hitTime,
+                        holdTime: holdDur,
+                        endTime: hitTime + holdDur,
+                        positionX: n.positionX * 0.05625,
+                        speed: n.speed || 1.0,
+                        floorPosition: floorPos,
+                        endFloorPosition: endFloorPos,
+                        isAbove: isAbove,
+                        judged: false,
+                        isHolding: false,
+                        holdTickTimer: 0,
+                        hitResult: null
+                    });
+                    totalNotes++;
+                });
+            };
+
+            processNoteList(line.notesAbove, true);
+            processNoteList(line.notesBelow, false);
+
+            judgeLines.push({
+                id: lineIdx,
+                bpm,
+                speedEvents,
+                moveEvents,
+                rotateEvents,
+                alphaEvents,
+                notes
+            });
+        });
+
+        return { offset, judgeLines, totalNotes };
+    }
+
+    static parsePEC(pecText) {
+        const lines = pecText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+        let offset = 0;
+        const bpms = [];
+        const lineMap = new Map();
+
+        const getLine = (id) => {
+            if (!lineMap.has(id)) {
+                lineMap.set(id, {
+                    id,
+                    bpm: 120,
+                    speedEvents: [],
+                    moveEvents: [],
+                    rotateEvents: [],
+                    alphaEvents: [],
+                    notes: []
+                });
+            }
+            return lineMap.get(id);
+        };
+
+        if (lines.length > 0 && !isNaN(Number(lines[0]))) {
+            offset = Number(lines[0]) / 1000;
+        }
+
+        const beatToSec = (beat) => {
+            if (bpms.length === 0) return beat * 0.5;
+            let sec = 0;
+            for (let i = 0; i < bpms.length; i++) {
+                const curr = bpms[i];
+                const nextBeat = (i + 1 < bpms.length) ? bpms[i + 1].beat : Infinity;
+                if (beat >= nextBeat) {
+                    sec += (nextBeat - curr.beat) * (60 / curr.bpm);
+                } else {
+                    sec += Math.max(0, beat - curr.beat) * (60 / curr.bpm);
+                    break;
+                }
+            }
+            return sec;
+        };
+
+        let lastNote = null;
+
+        lines.forEach(raw => {
+            const p = raw.split(/\s+/);
+            const cmd = p[0];
+
+            if (cmd === 'bp') {
+                bpms.push({ beat: Number(p[1]), bpm: Number(p[2]) });
+                bpms.sort((a, b) => a.beat - b.beat);
+            } else if (cmd === 'cp') {
+                const l = getLine(Number(p[1]));
+                const t = beatToSec(Number(p[2]));
+                l.moveEvents.push({ startTime: t, endTime: t, startX: Number(p[3]) / 2048, endX: Number(p[3]) / 2048, startY: Number(p[4]) / 1400, endY: Number(p[4]) / 1400 });
+            } else if (cmd === 'cm') {
+                const l = getLine(Number(p[1]));
+                l.moveEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), startX: null, endX: Number(p[4]) / 2048, startY: null, endY: Number(p[5]) / 1400 });
+            } else if (cmd === 'cd') {
+                const l = getLine(Number(p[1]));
+                const t = beatToSec(Number(p[2]));
+                l.rotateEvents.push({ startTime: t, endTime: t, start: -Number(p[3]), end: -Number(p[3]) });
+            } else if (cmd === 'cr') {
+                const l = getLine(Number(p[1]));
+                l.rotateEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), start: null, end: -Number(p[4]) });
+            } else if (cmd === 'ca') {
+                const l = getLine(Number(p[1]));
+                const t = beatToSec(Number(p[2]));
+                const a = Math.max(0, Number(p[3])) / 255;
+                l.alphaEvents.push({ startTime: t, endTime: t, start: a, end: a });
+            } else if (cmd === 'cf') {
+                const l = getLine(Number(p[1]));
+                const a = Math.max(0, Number(p[4])) / 255;
+                l.alphaEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), start: null, end: a });
+            } else if (cmd === 'cv') {
+                const l = getLine(Number(p[1]));
+                l.speedEvents.push({ startTime: beatToSec(Number(p[2])), endTime: 999999, value: Number(p[3]) / 7.0 });
+            } else if (['n1', 'n2', 'n3', 'n4'].includes(cmd)) {
+                const l = getLine(Number(p[1]));
+                const t = beatToSec(Number(p[2]));
+                const typeMap = { n1: 1, n2: 3, n3: 4, n4: 2 };
+                const type = typeMap[cmd];
+                let endT = t;
+                let posX, above;
+                if (cmd === 'n2') {
+                    endT = beatToSec(Number(p[3]));
+                    posX = Number(p[4]) / 2048;
+                    above = Number(p[5]) === 1;
+                } else {
+                    posX = Number(p[3]) / 2048;
+                    above = Number(p[4]) === 1;
+                }
+                lastNote = {
+                    id: `pec_${l.id}_${l.notes.length}`,
+                    type,
+                    time: t,
+                    holdTime: Math.max(0, endT - t),
+                    endTime: endT,
+                    positionX: posX,
+                    speed: 1.0,
+                    floorPosition: 0,
+                    endFloorPosition: 0,
+                    isAbove: above,
+                    judged: false,
+                    isHolding: false,
+                    holdTickTimer: 0,
+                    hitResult: null
+                };
+                l.notes.push(lastNote);
+            } else if (cmd === '#' && lastNote) {
+                lastNote.speed = Number(p[1]);
+            }
+        });
+
+        let totalNotes = 0;
+        const judgeLines = [];
+
+        lineMap.forEach(l => {
+            l.moveEvents.sort((a, b) => a.startTime - b.startTime);
+            for (let i = 0; i < l.moveEvents.length; i++) {
+                if (l.moveEvents[i].startX === null) {
+                    l.moveEvents[i].startX = i > 0 ? l.moveEvents[i - 1].endX : 0.5;
+                    l.moveEvents[i].startY = i > 0 ? l.moveEvents[i - 1].endY : 0.2;
+                }
+            }
+            if (l.moveEvents.length === 0) l.moveEvents.push({ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.2, endY: 0.2 });
+
+            l.rotateEvents.sort((a, b) => a.startTime - b.startTime);
+            for (let i = 0; i < l.rotateEvents.length; i++) {
+                if (l.rotateEvents[i].start === null) l.rotateEvents[i].start = i > 0 ? l.rotateEvents[i - 1].end : 0;
+            }
+            if (l.rotateEvents.length === 0) l.rotateEvents.push({ startTime: 0, endTime: 999999, start: 0, end: 0 });
+
+            l.alphaEvents.sort((a, b) => a.startTime - b.startTime);
+            for (let i = 0; i < l.alphaEvents.length; i++) {
+                if (l.alphaEvents[i].start === null) l.alphaEvents[i].start = i > 0 ? l.alphaEvents[i - 1].end : 1;
+            }
+            if (l.alphaEvents.length === 0) l.alphaEvents.push({ startTime: 0, endTime: 999999, start: 1, end: 1 });
+
+            l.speedEvents.sort((a, b) => a.startTime - b.startTime);
+            if (l.speedEvents.length === 0) l.speedEvents.push({ startTime: 0, endTime: 999999, value: 1.0 });
+            let pos = 0;
+            for (let i = 0; i < l.speedEvents.length; i++) {
+                if (i + 1 < l.speedEvents.length) l.speedEvents[i].endTime = l.speedEvents[i + 1].startTime;
+                l.speedEvents[i].floorPosition = pos;
+                pos += Math.max(0, l.speedEvents[i].endTime - l.speedEvents[i].startTime) * l.speedEvents[i].value;
+            }
+
+            l.notes.forEach(n => {
+                n.floorPosition = this.calcFloorPosition(l.speedEvents, n.time);
+                n.endFloorPosition = this.calcFloorPosition(l.speedEvents, n.endTime);
+                totalNotes++;
+            });
+
+            judgeLines.push(l);
+        });
+
+        return { offset, judgeLines, totalNotes };
+    }
+
+    static calcFloorPosition(speedEvents, time) {
+        if (!speedEvents || speedEvents.length === 0) return time;
+        for (let i = 0; i < speedEvents.length; i++) {
+            const ev = speedEvents[i];
+            if (time >= ev.startTime && time <= ev.endTime) {
+                return ev.floorPosition + (time - ev.startTime) * ev.value;
+            }
+        }
+        const last = speedEvents[speedEvents.length - 1];
+        return last.floorPosition + (time - last.startTime) * last.value;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 5. ファイル読み込み & 画面全体ドラッグ＆ドロップ処理（デモなし・必須チェック付き）
+// ----------------------------------------------------------------------------
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    const colors = {
+        info: 'bg-slate-900/95 border-cyan-400 text-cyan-200',
+        success: 'bg-slate-900/95 border-emerald-400 text-emerald-200',
+        error: 'bg-slate-900/95 border-rose-500 text-rose-200'
+    };
+    toast.className = `px-4 py-3 rounded-xl border-l-4 shadow-xl backdrop-blur-md text-xs sm:text-sm font-bold transition-all duration-300 transform translate-x-0 ${colors[type] || colors.info}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
+}
+
+// アセット読み込み状態に応じてUIとプレイ開始ボタンの有効/無効を更新
+function updateAssetStatusUI() {
+    const hasChart = Boolean(AppState.chart && AppState.totalNotes > 0);
+    const hasAudio = Boolean(AppState.audioBuffer);
+    const hasBg = Boolean(AppState.bgImage);
+
+    // 譜面スロット
+    const chartCard = document.getElementById('chartSlotCard');
+    const chartDot = document.getElementById('chartStatusDot');
+    if (hasChart) {
+        chartCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/40 flex flex-col justify-between transition-colors";
+        chartDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]";
+        document.getElementById('chartFileName').textContent = AppState.chartFileName;
+        document.getElementById('chartFileName').className = "text-xs text-slate-200 truncate font-medium";
+        document.getElementById('noteCountText').textContent = `総ノーツ数: ${AppState.totalNotes}`;
+    } else {
+        chartCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors";
+        chartDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+        document.getElementById('chartFileName').textContent = "未読み込み (.json / .pec)";
+        document.getElementById('chartFileName').className = "text-xs text-slate-400 truncate font-medium";
+        document.getElementById('noteCountText').textContent = "総ノーツ数: -";
+    }
+
+    // 音源スロット
+    const audioCard = document.getElementById('audioSlotCard');
+    const audioDot = document.getElementById('audioStatusDot');
+    if (hasAudio) {
+        audioCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/40 flex flex-col justify-between transition-colors";
+        audioDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]";
+        document.getElementById('audioFileName').textContent = AppState.audioFileName;
+        document.getElementById('audioFileName').className = "text-xs text-slate-200 truncate font-medium";
+        const mins = Math.floor(AppState.audioDuration / 60).toString().padStart(2, '0');
+        const secs = Math.floor(AppState.audioDuration % 60).toString().padStart(2, '0');
+        document.getElementById('audioDurationText').textContent = `再生時間: ${mins}:${secs}`;
+    } else {
+        audioCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors";
+        audioDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500";
+        document.getElementById('audioFileName').textContent = "未読み込み (.mp3 / .ogg / .wav)";
+        document.getElementById('audioFileName').className = "text-xs text-slate-400 truncate font-medium";
+        document.getElementById('audioDurationText').textContent = "再生時間: --:--";
+    }
+
+    // 背景スロット
+    const bgCard = document.getElementById('bgSlotCard');
+    const bgDot = document.getElementById('bgStatusDot');
+    if (hasBg) {
+        bgCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-cyan-500/40 flex flex-col justify-between transition-colors";
+        bgDot.className = "w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_#00f0ff]";
+        document.getElementById('bgFileName').textContent = AppState.bgFileName;
+        document.getElementById('bgFileName').className = "text-xs text-slate-200 truncate font-medium";
+    } else {
+        bgCard.className = "p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col justify-between transition-colors";
+        bgDot.className = "w-2.5 h-2.5 rounded-full bg-slate-600";
+        document.getElementById('bgFileName').textContent = "デフォルト幾何学背景";
+        document.getElementById('bgFileName').className = "text-xs text-slate-400 truncate font-medium";
+    }
+
+    // 準備完了バッジ＆スタートボタン
+    const readyBadge = document.getElementById('readyStatusBadge');
+    const startBtn = document.getElementById('startGameBtn');
+    const startBtnText = document.getElementById('startBtnText');
+
+    if (hasChart && hasAudio) {
+        readyBadge.textContent = "プレイ準備完了！";
+        readyBadge.className = "text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 font-bold";
+
+        startBtn.disabled = false;
+        startBtn.className = "phi-cut w-full py-4 px-6 bg-gradient-to-r from-cyan-500 via-cyan-400 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 cursor-pointer font-black text-lg sm:text-xl tracking-widest shadow-[0_0_25px_rgba(0,240,255,0.5)] transition transform active:scale-95 flex items-center justify-center gap-3";
+        startBtnText.textContent = "プレイ開始";
+    } else {
+        const missing = [];
+        if (!hasChart) missing.push("譜面");
+        if (!hasAudio) missing.push("音源");
+
+        readyBadge.textContent = `${missing.join('と')}が未読み込みです`;
+        readyBadge.className = "text-xs px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/40 font-bold";
+
+        startBtn.disabled = true;
+        startBtn.className = "phi-cut w-full py-4 px-6 bg-slate-800 text-slate-500 cursor-not-allowed font-black text-base sm:text-lg tracking-wider transition flex items-center justify-center gap-3";
+        startBtnText.textContent = `${missing.join('・')}を読み込んでください`;
+    }
+}
+
+function clearAllAssets() {
+    AppState.chart = null;
+    AppState.chartFileName = "";
+    AppState.totalNotes = 0;
+    AppState.audioBuffer = null;
+    AppState.audioFileName = "";
+    AppState.audioDuration = 0;
+    AppState.bgImage = null;
+    AppState.bgFileName = "";
+    AppState.title = "";
+    document.getElementById('songTitleInput').value = "";
+    updateAssetStatusUI();
+}
+
+async function handleIncomingFiles(fileList) {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    let loadedChart = false;
+    let loadedAudio = false;
+    let loadedBg = false;
+
+    const processSingleEntry = async (name, getArrayBuffer, getText) => {
+        const lower = name.toLowerCase();
+
+        // info.txt / info.csv から曲名や難易度を自動抽出
+        if (lower === 'info.txt' || lower === 'info.csv') {
+            try {
+                const text = await getText();
+                const nameMatch = text.match(/Name:\s*(.+)/i);
+                const levelMatch = text.match(/Level:\s*(.+)/i);
+                if (nameMatch && nameMatch[1]) {
+                    AppState.title = nameMatch[1].trim();
+                    document.getElementById('songTitleInput').value = AppState.title;
+                }
+                if (levelMatch && levelMatch[1]) {
+                    AppState.difficulty = levelMatch[1].trim();
+                    document.getElementById('difficultyInput').value = AppState.difficulty;
+                }
+            } catch (e) {}
+            return;
+        }
+
+        // 1. 譜面ファイル (.json / .pec)
+        if (lower.endsWith('.json')) {
+            try {
+                const text = await getText();
+                const obj = JSON.parse(text);
+                if (obj.judgeLineList) {
+                    const parsed = ChartParser.parseOfficialJSON(obj);
+                    if (parsed.totalNotes > 0) {
+                        AppState.chart = parsed;
+                        AppState.totalNotes = parsed.totalNotes;
+                        AppState.chartFileName = name;
+                        if (obj.name && !AppState.title) {
+                            AppState.title = obj.name;
+                            document.getElementById('songTitleInput').value = obj.name;
+                        } else if (!AppState.title) {
+                            const baseName = name.replace(/\.[^/.]+$/, "");
+                            AppState.title = baseName;
+                            document.getElementById('songTitleInput').value = baseName;
+                        }
+                        loadedChart = true;
+                    }
+                }
+            } catch (err) {
+                console.error("JSONパースエラー:", err);
+                showToast(`JSON譜面の読み込みに失敗しました: ${name}`, 'error');
+            }
+        } else if (lower.endsWith('.pec')) {
+            try {
+                const text = await getText();
+                const parsed = ChartParser.parsePEC(text);
+                if (parsed.totalNotes > 0) {
+                    AppState.chart = parsed;
+                    AppState.totalNotes = parsed.totalNotes;
+                    AppState.chartFileName = name;
+                    if (!AppState.title) {
+                        const baseName = name.replace(/\.[^/.]+$/, "");
+                        AppState.title = baseName;
+                        document.getElementById('songTitleInput').value = baseName;
+                    }
+                    loadedChart = true;
+                }
+            } catch (err) {
+                console.error("PECパースエラー:", err);
+                showToast(`PEC譜面の読み込みに失敗しました: ${name}`, 'error');
+            }
+        }
+        // 2. 音源ファイル (.mp3 / .ogg / .wav / .m4a)
+        else if (/\.(mp3|ogg|wav|m4a)$/i.test(lower)) {
+            try {
+                const buf = await getArrayBuffer();
+                const decoded = await soundEngine.decodeAudio(buf);
+                AppState.audioBuffer = decoded;
+                AppState.audioDuration = decoded.duration;
+                AppState.audioFileName = name;
+                
+                if (!AppState.title) {
+                    const baseName = name.replace(/\.[^/.]+$/, "");
+                    AppState.title = baseName;
+                    document.getElementById('songTitleInput').value = baseName;
+                }
+                loadedAudio = true;
+            } catch (err) {
+                console.error("音源デコードエラー:", err);
+                showToast(`音源のデコードに失敗しました: ${name}`, 'error');
+            }
+        }
+        // 3. 背景画像 (.png / .jpg / .jpeg / .webp)
+        else if (/\.(png|jpg|jpeg|webp)$/i.test(lower)) {
+            try {
+                const buf = await getArrayBuffer();
+                const blob = new Blob([buf]);
+                const url = URL.createObjectURL(blob);
+                const img = new Image();
+                await new Promise((res, rej) => {
+                    img.onload = res;
+                    img.onerror = rej;
+                    img.src = url;
+                });
+                AppState.bgImage = img;
+                AppState.bgFileName = name;
+                loadedBg = true;
+            } catch (err) {
+                console.error("画像読み込みエラー:", err);
+                showToast(`画像の読み込みに失敗しました: ${name}`, 'error');
+            }
+        }
+    };
+
+    for (const file of files) {
+        if (file.name.toLowerCase().endsWith('.zip')) {
+            try {
+                showToast(`ZIPファイルを展開中: ${file.name}...`, 'info');
+                const zip = await JSZip.loadAsync(file);
+                const entries = Object.values(zip.files).filter(entry => !entry.dir && !entry.name.startsWith('__MACOSX'));
+                for (const entry of entries) {
+                    const shortName = entry.name.split('/').pop();
+                    await processSingleEntry(
+                        shortName,
+                        () => entry.async('arraybuffer'),
+                        () => entry.async('string')
+                    );
+                }
+            } catch (err) {
+                console.error("ZIP展開エラー:", err);
+                showToast(`ZIPファイルの展開に失敗しました: ${file.name}`, 'error');
+            }
+        } else {
+            await processSingleEntry(
+                file.name,
+                () => file.arrayBuffer(),
+                () => file.text()
+            );
+        }
+    }
+
+    updateAssetStatusUI();
+
+    if (loadedChart || loadedAudio || loadedBg) {
+        const loadedParts = [];
+        if (loadedChart) loadedParts.push("譜面");
+        if (loadedAudio) loadedParts.push("音源");
+        if (loadedBg) loadedParts.push("背景画像");
+        showToast(`${loadedParts.join('・')} を読み込みました！`, 'success');
+    }
+}
+
+// 画面全体ドラッグ＆ドロップイベント (iPad Split View / Android / PC対応)
+let dragCounter = 0;
+const dropOverlay = document.getElementById('dropOverlay');
+
+window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter++;
+    dropOverlay.classList.remove('hidden');
+}, false);
+
+window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+    }
+}, false);
+
+window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter--;
+    if (dragCounter <= 0) {
+        dragCounter = 0;
+        dropOverlay.classList.add('hidden');
+    }
+}, false);
+
+window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter = 0;
+    dropOverlay.classList.add('hidden');
+
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        if (AppState.isPlaying && !AppState.isPaused) {
+            pauseGame();
+        }
+        await handleIncomingFiles(e.dataTransfer.files);
+    }
+}, false);
+
+// ----------------------------------------------------------------------------
+// 6. 全画面表示切替 (Fullscreen API)
+// ----------------------------------------------------------------------------
+function updateFullscreenLabels() {
+    const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    document.querySelectorAll('.fsBtnLabel').forEach(el => {
+        el.textContent = isFs ? '全画面解除' : '全画面';
+    });
+}
+
+async function toggleFullscreen() {
+    const docEl = document.documentElement;
+    const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+
+    try {
+        if (!isFs) {
+            if (docEl.requestFullscreen) {
+                await docEl.requestFullscreen();
+            } else if (docEl.webkitRequestFullscreen) {
+                await docEl.webkitRequestFullscreen();
+            } else {
+                showToast("このブラウザでは全画面APIが制限されています。「ホーム画面に追加」で全画面表示が可能です。", 'info');
+            }
+        } else {
+            if (document.exitFullscreen) {
+                await document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                await document.webkitExitFullscreen();
+            }
+        }
+    } catch (err) {
+        showToast("全画面表示の切り替えがブラウザにより制限されました", 'info');
+    }
+    updateFullscreenLabels();
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenLabels);
+document.addEventListener('webkitfullscreenchange', updateFullscreenLabels);
+
+// ----------------------------------------------------------------------------
+// 7. Canvas描画 & ゲームロジック（判定ライン・4種ノーツ・マルチタッチ判定）
+// ----------------------------------------------------------------------------
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    const winW = window.innerWidth;
+    const winH = window.innerHeight;
+    const targetRatio = 16 / 9;
+    let drawW = winW;
+    let drawH = winW / targetRatio;
+
+    if (drawH > winH) {
+        drawH = winH;
+        drawW = winH * targetRatio;
+    }
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.style.width = `${drawW}px`;
+    canvas.style.height = `${drawH}px`;
+    canvas.width = Math.floor(drawW * dpr);
+    canvas.height = Math.floor(drawH * dpr);
+}
+window.addEventListener('resize', resizeCanvas);
+
+function getInterpolatedValue(events, time, keyStart, keyEnd, defaultVal) {
+    if (!events || events.length === 0) return defaultVal;
+    for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        if (time >= ev.startTime && time <= ev.endTime) {
+            const dur = ev.endTime - ev.startTime;
+            if (dur <= 0) return ev[keyEnd];
+            const progress = (time - ev.startTime) / dur;
+            return ev[keyStart] + (ev[keyEnd] - ev[keyStart]) * progress;
+        }
+    }
+    if (time < events[0].startTime) return events[0][keyStart];
+    return events[events.length - 1][keyEnd];
+}
+
+const JUDGE_WINDOW = {
+    PERFECT: 0.080,
+    GOOD: 0.160,
+    BAD: 0.220
+};
+
+function registerJudgement(result, note, lineScreenX, lineScreenY) {
+    const stats = AppState.stats;
+    if (result === 'PERFECT') {
+        stats.perfect++;
+        stats.combo++;
+    } else if (result === 'GOOD') {
+        stats.good++;
+        stats.combo++;
+    } else if (result === 'BAD') {
+        stats.bad++;
+        stats.combo = 0;
+    } else if (result === 'MISS') {
+        stats.miss++;
+        stats.combo = 0;
+    }
+
+    if (stats.combo > stats.maxCombo) {
+        stats.maxCombo = stats.combo;
+    }
+
+    const total = Math.max(1, AppState.totalNotes);
+    const accScore = ((stats.perfect + stats.good * 0.65) / total) * 900000;
+    const comboScore = (stats.maxCombo / total) * 100000;
+    stats.score = Math.round(accScore + comboScore);
+
+    if (result === 'PERFECT' || result === 'GOOD') {
+        soundEngine.playHitSound(note.type);
+        spawnHitEffect(lineScreenX, lineScreenY, result === 'PERFECT' ? '#ffd700' : '#00f0ff');
+    }
+
+    AppState.judgePopups.push({
+        text: result,
+        color: result === 'PERFECT' ? '#ffd700' : (result === 'GOOD' ? '#00f0ff' : (result === 'BAD' ? '#c084fc' : '#fb7185')),
+        x: lineScreenX,
+        y: lineScreenY - 25,
+        alpha: 1.0,
+        vy: -45
+    });
+}
+
+function spawnHitEffect(x, y, color) {
+    const particles = [];
+    for (let i = 0; i < 8; i++) {
+        const ang = (Math.PI * 2 * i) / 8 + (Math.random() * 0.4);
+        const spd = 90 + Math.random() * 140;
+        particles.push({
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd,
+            size: 3 + Math.random() * 4
+        });
+    }
+    AppState.effects.push({
+        x, y, color,
+        age: 0,
+        maxAge: 0.36,
+        particles
+    });
+}
+
+// ----------------------------------------------------------------------------
+// 8. マルチタッチ・マウス・キーボード入力トラッキング
+// ----------------------------------------------------------------------------
+function getCanvasCoords(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
+    };
+}
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const now = performance.now();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const pos = getCanvasCoords(t.clientX, t.clientY);
+        AppState.pointers.set(t.identifier, {
+            x: pos.x,
+            y: pos.y,
+            prevX: pos.x,
+            prevY: pos.y,
+            speed: 0,
+            isDown: true,
+            justPressed: true,
+            downTime: now
+        });
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const p = AppState.pointers.get(t.identifier);
+        if (p) {
+            const pos = getCanvasCoords(t.clientX, t.clientY);
+            const dx = pos.x - p.x;
+            const dy = pos.y - p.y;
+            p.speed = Math.hypot(dx, dy);
+            p.prevX = p.x;
+            p.prevY = p.y;
+            p.x = pos.x;
+            p.y = pos.y;
+        }
+    }
+}, { passive: false });
+
+const handleTouchEnd = (e) => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        AppState.pointers.delete(t.identifier);
+    }
+};
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+canvas.addEventListener('mousedown', (e) => {
+    const pos = getCanvasCoords(e.clientX, e.clientY);
+    AppState.pointers.set('mouse', {
+        x: pos.x,
+        y: pos.y,
+        prevX: pos.x,
+        prevY: pos.y,
+        speed: 0,
+        isDown: true,
+        justPressed: true,
+        downTime: performance.now()
+    });
+});
+
+window.addEventListener('mousemove', (e) => {
+    const p = AppState.pointers.get('mouse');
+    if (p) {
+        const pos = getCanvasCoords(e.clientX, e.clientY);
+        const dx = pos.x - p.x;
+        const dy = pos.y - p.y;
+        p.speed = Math.hypot(dx, dy);
+        p.prevX = p.x;
+        p.prevY = p.y;
+        p.x = pos.x;
+        p.y = pos.y;
+    }
+});
+
+window.addEventListener('mouseup', () => {
+    AppState.pointers.delete('mouse');
+});
+
+window.addEventListener('keydown', (e) => {
+    // 音ズレ調整モーダル表示中はSpace/Enterでタップ計測
+    if (calibrator.isActive) {
+        if (e.code === 'Space' || e.code === 'Enter') {
+            e.preventDefault();
+            calibrator.recordTap();
+        } else if (e.code === 'Escape') {
+            calibrator.close();
+        }
+        return;
+    }
+
+    if (e.code === 'Escape' && AppState.isPlaying) {
+        if (AppState.isPaused) resumeGame();
+        else pauseGame();
+        return;
+    }
+    if (!AppState.isPlaying || AppState.isPaused) return;
+    if (!AppState.activeKeys.has(e.code)) {
+        AppState.activeKeys.add(e.code);
+        AppState.pointers.set(`key_${e.code}`, {
+            x: canvas.width * 0.5,
+            y: canvas.height * 0.5,
+            speed: 35,
+            isDown: true,
+            justPressed: true,
+            isKeyboard: true
+        });
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    AppState.activeKeys.delete(e.code);
+    AppState.pointers.delete(`key_${e.code}`);
+});
+
+// ----------------------------------------------------------------------------
+// 9. メインレンダリング＆更新ループ
+// ----------------------------------------------------------------------------
+let lastFrameTime = performance.now();
+
+function updateAndRender(now) {
+    requestAnimationFrame(updateAndRender);
+
+    const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+    lastFrameTime = now;
+
+    const W = canvas.width;
+    const H = canvas.height;
+    if (W === 0 || H === 0) return;
+
+    ctx.clearRect(0, 0, W, H);
+    drawBackground(W, H);
+
+    if (!AppState.isPlaying || !AppState.chart) {
+        return;
+    }
+
+    // 現在の楽曲時刻（譜面オフセット + Arcaea式音ズレ調整オフセット適用）
+    const rawTime = soundEngine.getCurrentTime();
+    const chartTime = rawTime - (AppState.chart.offset || 0) - (AppState.settings.offsetMs / 1000);
+
+    // 楽曲終了チェック
+    if (!AppState.isPaused && rawTime >= AppState.audioDuration + 1.0) {
+        finishGame();
+        return;
+    }
+
+    const noteWidthBase = W * 0.125 * AppState.settings.noteScale;
+    const noteHeightBase = Math.max(10, H * 0.018 * AppState.settings.noteScale);
+    const speedScaleY = H * 0.62;
+
+    AppState.chart.judgeLines.forEach(line => {
+        const normX = getInterpolatedValue(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
+        const normY = getInterpolatedValue(line.moveEvents, chartTime, 'startY', 'endY', 0.2);
+        const deg = getInterpolatedValue(line.rotateEvents, chartTime, 'start', 'end', 0);
+        const alpha = Math.max(0, Math.min(1, getInterpolatedValue(line.alphaEvents, chartTime, 'start', 'end', 1)));
+
+        const lineX = normX * W;
+        const lineY = (1 - normY) * H;
+        const rad = (-deg * Math.PI) / 180;
+
+        const currentFloorPos = ChartParser.calcFloorPosition(line.speedEvents, chartTime);
+
+        ctx.save();
+        ctx.translate(lineX, lineY);
+        ctx.rotate(rad);
+
+        if (alpha > 0.01) {
+            ctx.globalAlpha = alpha;
+            const lineColor = (AppState.stats.bad === 0 && AppState.stats.miss === 0) ? '#ffd700' : '#ffffff';
+            ctx.strokeStyle = lineColor;
+            ctx.lineWidth = Math.max(3, H * 0.0055);
+            ctx.shadowColor = lineColor === '#ffd700' ? 'rgba(255, 215, 0, 0.8)' : 'rgba(0, 240, 255, 0.6)';
+            ctx.shadowBlur = 10;
+
+            const lineLen = Math.hypot(W, H) * 1.5;
+            ctx.beginPath();
+            ctx.moveTo(-lineLen, 0);
+            ctx.lineTo(lineLen, 0);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        const cosA = Math.cos(rad);
+        const sinA = Math.sin(rad);
+
+        for (let i = 0; i < line.notes.length; i++) {
+            const note = line.notes[i];
+            if (note.judged) continue;
+
+            const timeDiff = note.time - chartTime;
+            const localX = note.positionX * W;
+            const dir = note.isAbove ? -1 : 1;
+
+            const worldNoteX = lineX + localX * cosA;
+            const worldNoteY = lineY + localX * sinA;
+
+            if (!AppState.isPaused) {
+                if (AppState.settings.autoPlay) {
+                    if (note.type === 3) {
+                        if (chartTime >= note.time && !note.isHolding) {
+                            note.isHolding = true;
+                            soundEngine.playHitSound(3);
+                            spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
+                        }
+                        if (note.isHolding) {
+                            note.holdTickTimer += dt;
+                            if (note.holdTickTimer >= 0.14) {
+                                note.holdTickTimer = 0;
+                                spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
+                            }
+                            if (chartTime >= note.endTime) {
+                                note.judged = true;
+                                registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                        }
+                    } else if (chartTime >= note.time) {
+                        note.judged = true;
+                        registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                        continue;
+                    }
+                } else {
+                    const absDiff = Math.abs(timeDiff);
+                    const hitRadius = Math.max(noteWidthBase * 1.15, W * 0.11);
+
+                    let matchedPointer = null;
+                    for (const [, ptr] of AppState.pointers) {
+                        if (ptr.isKeyboard) {
+                            matchedPointer = ptr;
+                            break;
+                        }
+                        const relX = ptr.x - lineX;
+                        const relY = ptr.y - lineY;
+                        const projX = relX * cosA + relY * sinA;
+                        const projY = -relX * sinA + relY * cosA;
+
+                        if (Math.abs(projX - localX) <= hitRadius && Math.abs(projY) <= H * 0.45) {
+                            matchedPointer = ptr;
+                            break;
+                        }
+                    }
+
+                    if (note.type === 1) {
+                        if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
+                            matchedPointer.justPressed = false;
+                            note.judged = true;
+                            const res = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : (absDiff <= JUDGE_WINDOW.GOOD ? 'GOOD' : 'BAD');
+                            registerJudgement(res, note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                    } else if (note.type === 2) {
+                        if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
+                            note.judged = true;
+                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                    } else if (note.type === 4) {
+                        if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
+                            matchedPointer.justPressed = false;
+                            note.judged = true;
+                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                    } else if (note.type === 3) {
+                        if (!note.isHolding) {
+                            if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
+                                matchedPointer.justPressed = false;
+                                note.isHolding = true;
+                                note.hitResult = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : 'GOOD';
+                                soundEngine.playHitSound(3);
+                                spawnHitEffect(worldNoteX, worldNoteY, note.hitResult === 'PERFECT' ? '#ffd700' : '#00f0ff');
+                            } else if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                                note.judged = true;
+                                registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                        } else {
+                            if (chartTime >= note.endTime - 0.08) {
+                                note.judged = true;
+                                registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                            if (matchedPointer) {
+                                note.holdTickTimer += dt;
+                                if (note.holdTickTimer >= 0.15) {
+                                    note.holdTickTimer = 0;
+                                    spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
+                                }
+                            } else {
+                                note.judged = true;
+                                registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ノーツ描画
+            const distStart = (note.floorPosition - currentFloorPos) * speedScaleY * note.speed;
+            if (note.type === 3) {
+                const headDist = note.isHolding ? 0 : Math.max(0, distStart);
+                const tailDist = (note.endFloorPosition - currentFloorPos) * speedScaleY * note.speed;
+                if (tailDist < -50 || headDist > H * 1.8) continue;
+
+                const yHead = dir * headDist;
+                const yTail = dir * tailDist;
+                const bodyTop = Math.min(yHead, yTail);
+                const bodyHeight = Math.abs(yTail - yHead);
+
+                ctx.globalAlpha = 0.85;
+                ctx.fillStyle = '#00d8ff';
+                ctx.fillRect(localX - noteWidthBase * 0.46, bodyTop, noteWidthBase * 0.92, bodyHeight);
+
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(localX - noteWidthBase * 0.5, yHead - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+            } else {
+                if (distStart < -40 || distStart > H * 1.8) continue;
+                const yPos = dir * distStart;
+
+                ctx.globalAlpha = 1.0;
+                if (note.type === 1) {
+                    ctx.fillStyle = '#00f0ff';
+                    ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(localX - noteWidthBase * 0.45, yPos - noteHeightBase * 0.2, noteWidthBase * 0.9, noteHeightBase * 0.4);
+                } else if (note.type === 2) {
+                    ctx.fillStyle = '#ffd700';
+                    ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.45, noteWidthBase, noteHeightBase * 0.9);
+                } else if (note.type === 4) {
+                    ctx.fillStyle = '#ff2a6d';
+                    ctx.fillRect(localX - noteWidthBase * 0.52, yPos - noteHeightBase * 0.55, noteWidthBase * 1.04, noteHeightBase * 1.1);
+                    ctx.fillStyle = '#ffd1dc';
+                    ctx.fillRect(localX - noteWidthBase * 0.35, yPos - noteHeightBase * 0.2, noteWidthBase * 0.7, noteHeightBase * 0.4);
+                }
+            }
+        }
+
+        ctx.restore();
+    });
+
+    for (const [, ptr] of AppState.pointers) {
+        ptr.justPressed = false;
+        ptr.speed *= 0.6;
+    }
+
+    drawEffects(dt, W, H);
+    drawTouchFeedback(W, H);
+    drawGameHUD(W, H, rawTime);
+}
+
+function drawBackground(W, H) {
+    if (AppState.bgImage) {
+        const img = AppState.bgImage;
+        const imgRatio = img.width / img.height;
+        const canvasRatio = W / H;
+        let dw = W, dh = H, dx = 0, dy = 0;
+
+        if (imgRatio > canvasRatio) {
+            dw = H * imgRatio;
+            dx = (W - dw) / 2;
+        } else {
+            dh = W / imgRatio;
+            dy = (H - dh) / 2;
+        }
+        ctx.drawImage(img, dx, dy, dw, dh);
+    } else {
+        const grad = ctx.createLinearGradient(0, 0, W, H);
+        grad.addColorStop(0, '#060b19');
+        grad.addColorStop(0.5, '#0c1933');
+        grad.addColorStop(1, '#071124');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.08)';
+        ctx.lineWidth = 2;
+        ctx.translate(W / 2, H / 2);
+        ctx.rotate(Math.PI / 4);
+        const boxSize = Math.min(W, H) * 0.55;
+        ctx.strokeRect(-boxSize / 2, -boxSize / 2, boxSize, boxSize);
+        ctx.strokeRect(-boxSize * 0.35, -boxSize * 0.35, boxSize * 0.7, boxSize * 0.7);
+        ctx.restore();
+    }
+
+    const dimAlpha = 1.0 - AppState.settings.bgBrightness;
+    ctx.fillStyle = `rgba(4, 8, 18, ${dimAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+}
+
+function drawEffects(dt, W, H) {
+    const baseBox = Math.min(W, H) * 0.085;
+
+    for (let i = AppState.effects.length - 1; i >= 0; i--) {
+        const ef = AppState.effects[i];
+        ef.age += dt;
+        if (ef.age >= ef.maxAge) {
+            AppState.effects.splice(i, 1);
+            continue;
+        }
+
+        const p = ef.age / ef.maxAge;
+        const alpha = 1 - p;
+
+        ctx.save();
+        ctx.translate(ef.x, ef.y);
+
+        ctx.save();
+        ctx.rotate(p * Math.PI * 0.5);
+        ctx.strokeStyle = ef.color;
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = 3;
+        const size = baseBox * (0.6 + p * 0.65);
+        ctx.strokeRect(-size / 2, -size / 2, size, size);
+        ctx.restore();
+
+        ctx.fillStyle = ef.color;
+        ctx.globalAlpha = alpha;
+        ef.particles.forEach(pt => {
+            const px = pt.vx * ef.age;
+            const py = pt.vy * ef.age;
+            ctx.fillRect(px - pt.size / 2, py - pt.size / 2, pt.size, pt.size);
+        });
+
+        ctx.restore();
+    }
+
+    for (let i = AppState.judgePopups.length - 1; i >= 0; i--) {
+        const jp = AppState.judgePopups[i];
+        jp.y += jp.vy * dt;
+        jp.alpha -= dt * 2.2;
+        if (jp.alpha <= 0) {
+            AppState.judgePopups.splice(i, 1);
+            continue;
+        }
+        ctx.save();
+        ctx.globalAlpha = jp.alpha;
+        ctx.fillStyle = jp.color;
+        ctx.font = `900 ${Math.max(14, Math.floor(H * 0.026))}px 'Rajdhani', sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(jp.text, jp.x, jp.y);
+        ctx.restore();
+    }
+}
+
+function drawTouchFeedback(W, H) {
+    for (const [, ptr] of AppState.pointers) {
+        if (ptr.isKeyboard) continue;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.55)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(ptr.x, ptr.y, Math.min(W, H) * 0.035, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+function drawGameHUD(W, H, rawTime) {
+    const progress = Math.max(0, Math.min(1, rawTime / Math.max(1, AppState.audioDuration)));
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(0, 0, W, Math.max(4, H * 0.006));
+    ctx.fillStyle = '#00f0ff';
+    ctx.fillRect(0, 0, W * progress, Math.max(4, H * 0.006));
+
+    const scoreStr = AppState.stats.score.toString().padStart(7, '0');
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 ${Math.floor(H * 0.045)}px 'Rajdhani', sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(scoreStr, W - W * 0.025, H * 0.068);
+    ctx.restore();
+
+    if (AppState.stats.combo >= 3) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `900 ${Math.floor(H * 0.062)}px 'Rajdhani', sans-serif`;
+        ctx.fillText(AppState.stats.combo.toString(), W / 2, H * 0.075);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        ctx.font = `700 ${Math.floor(H * 0.018)}px 'Rajdhani', sans-serif`;
+        ctx.fillText(AppState.settings.autoPlay ? 'AUTOPLAY' : 'COMBO', W / 2, H * 0.098);
+        ctx.restore();
+    }
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = `700 ${Math.floor(H * 0.024)}px 'Noto Sans JP', sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText(AppState.title, W * 0.025, H - H * 0.025);
+
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#00f0ff';
+    ctx.fillText(AppState.difficulty, W - W * 0.025, H - H * 0.025);
+    ctx.restore();
+}
+
+// ----------------------------------------------------------------------------
+// 10. ゲームフロー制御
+// ----------------------------------------------------------------------------
+function resetChartState() {
+    AppState.stats = {
+        perfect: 0,
+        good: 0,
+        bad: 0,
+        miss: 0,
+        combo: 0,
+        maxCombo: 0,
+        score: 0
+    };
+    AppState.effects = [];
+    AppState.judgePopups = [];
+    AppState.pointers.clear();
+
+    if (AppState.chart) {
+        AppState.chart.judgeLines.forEach(line => {
+            line.notes.forEach(n => {
+                n.judged = false;
+                n.isHolding = false;
+                n.holdTickTimer = 0;
+                n.hitResult = null;
+            });
+        });
+    }
+}
+
+async function startGame() {
+    if (!AppState.chart || !AppState.audioBuffer) {
+        showToast("譜面データと楽曲音源の両方を読み込んでください", 'error');
+        return;
+    }
+
+    AppState.title = document.getElementById('songTitleInput').value.trim() || AppState.chartFileName || "Untitled Track";
+    AppState.difficulty = document.getElementById('difficultyInput').value.trim() || "IN Lv.15";
+
+    resetChartState();
+
+    document.getElementById('mainMenu').classList.add('hidden');
+    document.getElementById('pauseModal').classList.add('hidden');
+    document.getElementById('resultModal').classList.add('hidden');
+    document.getElementById('hudOverlay').classList.remove('hidden');
+
+    const autoBadge = document.getElementById('autoBadge');
+    if (AppState.settings.autoPlay) autoBadge.classList.remove('hidden');
+    else autoBadge.classList.add('hidden');
+
+    AppState.isPlaying = true;
+    AppState.isPaused = false;
+
+    await soundEngine.startMusic(-1.2);
+}
+
+function pauseGame() {
+    if (!AppState.isPlaying || AppState.isPaused) return;
+    AppState.isPaused = true;
+    const cur = soundEngine.getCurrentTime();
+    soundEngine.stopMusic();
+    soundEngine.pauseOffset = cur;
+
+    document.getElementById('pauseSongTitle').textContent = `${AppState.title} [${AppState.difficulty}]`;
+    document.getElementById('pauseModal').classList.remove('hidden');
+}
+
+async function resumeGame() {
+    if (!AppState.isPlaying || !AppState.isPaused) return;
+    document.getElementById('pauseModal').classList.add('hidden');
+    AppState.isPaused = false;
+    await soundEngine.startMusic(soundEngine.pauseOffset);
+}
+
+function backToMenu() {
+    soundEngine.stopMusic();
+    AppState.isPlaying = false;
+    AppState.isPaused = false;
+
+    document.getElementById('hudOverlay').classList.add('hidden');
+    document.getElementById('pauseModal').classList.add('hidden');
+    document.getElementById('resultModal').classList.add('hidden');
+    document.getElementById('mainMenu').classList.remove('hidden');
+}
+
+function finishGame() {
+    soundEngine.stopMusic();
+    AppState.isPlaying = false;
+    AppState.isPaused = false;
+
+    document.getElementById('hudOverlay').classList.add('hidden');
+
+    const s = AppState.stats;
+    const total = Math.max(1, AppState.totalNotes);
+    const acc = ((s.perfect + s.good * 0.65) / total) * 100;
+
+    let rank = 'F';
+    if (s.score >= 1000000 && s.good === 0 && s.bad === 0 && s.miss === 0) rank = 'φ';
+    else if (s.score >= 960000) rank = 'V';
+    else if (s.score >= 920000) rank = 'S';
+    else if (s.score >= 880000) rank = 'A';
+    else if (s.score >= 820000) rank = 'B';
+    else if (s.score >= 700000) rank = 'C';
+
+    const clearBadge = document.getElementById('resultClearType');
+    if (rank === 'φ') {
+        clearBadge.textContent = 'ALL PERFECT (φ)';
+        clearBadge.className = 'px-3 py-1 rounded-lg bg-amber-500/20 border border-amber-400 text-amber-300 font-cyber font-bold text-sm tracking-widest';
+    } else if (s.bad === 0 && s.miss === 0) {
+        clearBadge.textContent = 'FULL COMBO';
+        clearBadge.className = 'px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-cyber font-bold text-sm tracking-widest';
+    } else if (rank !== 'F') {
+        clearBadge.textContent = 'STAGE CLEAR';
+        clearBadge.className = 'px-3 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-cyber font-bold text-sm tracking-widest';
+    } else {
+        clearBadge.textContent = 'FAILED';
+        clearBadge.className = 'px-3 py-1 rounded-lg bg-rose-500/20 border border-rose-400 text-rose-300 font-cyber font-bold text-sm tracking-widest';
+    }
+
+    document.getElementById('resultSongTitle').textContent = AppState.title;
+    document.getElementById('resultDiffBadge').textContent = AppState.difficulty;
+    document.getElementById('resultRank').textContent = rank;
+    document.getElementById('resultScore').textContent = s.score.toString().padStart(7, '0');
+    document.getElementById('resultMaxCombo').textContent = s.maxCombo.toString();
+    document.getElementById('resultAccuracy').textContent = `${acc.toFixed(2)}%`;
+
+    document.getElementById('resPerfect').textContent = s.perfect.toString();
+    document.getElementById('resGood').textContent = s.good.toString();
+    document.getElementById('resBad').textContent = s.bad.toString();
+    document.getElementById('resMiss').textContent = s.miss.toString();
+
+    document.getElementById('resultModal').classList.remove('hidden');
+}
+
+// ----------------------------------------------------------------------------
+// 11. UIイベントバインド & 初期化
+// ----------------------------------------------------------------------------
+window.onload = () => {
+    resizeCanvas();
+    updateAssetStatusUI();
+
+    // ファイル選択ボタン類
+    const fileInput = document.getElementById('fileInput');
+    const folderInput = document.getElementById('folderInput');
+
+    document.getElementById('selectFilesBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.click();
+    });
+    document.getElementById('selectFolderBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        folderInput.click();
+    });
+    document.getElementById('menuDropZone').addEventListener('click', () => {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', async (e) => {
+        await handleIncomingFiles(e.target.files);
+        fileInput.value = '';
+    });
+    folderInput.addEventListener('change', async (e) => {
+        await handleIncomingFiles(e.target.files);
+        folderInput.value = '';
+    });
+
+    document.getElementById('clearAssetsBtn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearAllAssets();
+        showToast("読み込んだファイルをクリアしました", 'info');
+    });
+
+    // 全画面表示ボタン（複数箇所）
+    document.querySelectorAll('.fullscreenToggleBtn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+    });
+
+    // Arcaea風 音ズレ調整モーダルイベント
+    document.getElementById('openCalibrationBtn').addEventListener('click', () => calibrator.open());
+    document.getElementById('closeCalibrationBtn').addEventListener('click', () => calibrator.close());
+    document.getElementById('calCancelBtn').addEventListener('click', () => calibrator.close());
+    document.getElementById('calApplyBtn').addEventListener('click', () => calibrator.apply());
+    document.getElementById('calResetBtn').addEventListener('click', () => calibrator.reset());
+
+    const calTapPad = document.getElementById('calTapPad');
+    calTapPad.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        calibrator.recordTap();
+    }, { passive: false });
+    calTapPad.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        calibrator.recordTap();
+    });
+
+    document.querySelectorAll('.calFineBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            calibrator.adjustManual(Number(btn.dataset.delta));
+        });
+    });
+
+    // 設定スライダー類
+    const noteScaleSlider = document.getElementById('noteScaleSlider');
+    noteScaleSlider.addEventListener('input', () => {
+        AppState.settings.noteScale = Number(noteScaleSlider.value);
+        document.getElementById('noteScaleValText').textContent = `${AppState.settings.noteScale.toFixed(2)}x`;
+    });
+
+    const bgDimSlider = document.getElementById('bgDimSlider');
+    bgDimSlider.addEventListener('input', () => {
+        const pct = Number(bgDimSlider.value);
+        AppState.settings.bgBrightness = pct / 100;
+        document.getElementById('bgDimValText').textContent = `${pct}%`;
+    });
+
+    const speedSlider = document.getElementById('speedSlider');
+    speedSlider.addEventListener('input', () => {
+        AppState.settings.playbackRate = Number(speedSlider.value);
+        document.getElementById('speedValText').textContent = `${AppState.settings.playbackRate.toFixed(2)}x`;
+    });
+
+    document.getElementById('autoPlayToggle').addEventListener('change', (e) => {
+        AppState.settings.autoPlay = e.target.checked;
+    });
+
+    document.getElementById('hitSoundToggle').addEventListener('change', (e) => {
+        AppState.settings.hitSound = e.target.checked;
+    });
+
+    // ゲーム操作ボタン
+    document.getElementById('startGameBtn').addEventListener('click', startGame);
+    document.getElementById('pauseBtn').addEventListener('click', pauseGame);
+    document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+    document.getElementById('retryBtn').addEventListener('click', startGame);
+    document.getElementById('backToMenuBtn').addEventListener('click', backToMenu);
+    document.getElementById('resultRetryBtn').addEventListener('click', startGame);
+    document.getElementById('resultMenuBtn').addEventListener('click', backToMenu);
+
+    // ガイドモーダル開閉
+    const guideModal = document.getElementById('guideModal');
+    document.getElementById('openGuideBtn').addEventListener('click', () => guideModal.classList.remove('hidden'));
+    document.getElementById('closeGuideBtn').addEventListener('click', () => guideModal.classList.add('hidden'));
+    document.getElementById('closeGuideBtnBottom').addEventListener('click', () => guideModal.classList.add('hidden'));
+
+    // アニメーションループ開始
+    requestAnimationFrame(updateAndRender);
+};
+</script>
+</body>
+</html>
