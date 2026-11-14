@@ -40,6 +40,15 @@
             touch-action: none;
         }
 
+        /* iOS Safari等Fullscreen API未対応環境向けの疑似全画面スタイル */
+        body.pseudo-fullscreen {
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100vw !important;
+            height: 100dvh !important;
+            z-index: 9999 !important;
+        }
+
         .font-cyber {
             font-family: 'Rajdhani', 'Noto Sans JP', sans-serif;
         }
@@ -318,13 +327,20 @@
                         <div>
                             <div class="flex justify-between text-xs mb-1">
                                 <span class="text-slate-300 font-medium">再生速度 (練習用)</span>
-                                <span id="speedValText" class="font-cyber font-bold text-amber-300">1.00x</span>
+                                <span id="speedValText" class="font-cyber font-bold text-cyan-300">1.00x</span>
                             </div>
                             <input type="range" id="speedSlider" min="0.5" max="1.5" step="0.05" value="1.0" class="w-full">
                         </div>
 
-                        <!-- オートプレイ＆ヒット音トグル -->
-                        <div class="grid grid-cols-2 gap-2.5 pt-1">
+                        <!-- 同時押しハイライト＆オートプレイ＆ヒット音トグル -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                            <label class="sm:col-span-2 flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-amber-400/30 cursor-pointer hover:border-amber-400/70 transition">
+                                <div>
+                                    <span class="text-xs font-bold text-amber-300 block">同時押しハイライト（黄色発光）</span>
+                                    <span class="text-[10px] text-slate-400">同タイミングの複数ノーツを本家風の金色フレームで強調</span>
+                                </div>
+                                <input type="checkbox" id="highlightToggle" checked class="w-4 h-4 accent-amber-400 rounded">
+                            </label>
                             <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-white/10 cursor-pointer hover:border-amber-400/50 transition">
                                 <span class="text-xs font-bold text-slate-200">オートプレイ</span>
                                 <input type="checkbox" id="autoPlayToggle" class="w-4 h-4 accent-amber-400 rounded">
@@ -411,7 +427,7 @@
                     </div>
                 </div>
 
-                <!-- 大型タップパッド (Arcaea風の菱形・サイバーパッド) -->
+                <!-- 大型タップパッド (Arcaea風のサイバーパッド) -->
                 <button type="button" id="calTapPad" class="w-full py-7 sm:py-8 rounded-2xl bg-gradient-to-b from-cyan-950/70 to-slate-950 hover:from-cyan-900/70 active:scale-[0.98] border-2 border-cyan-400/70 shadow-[0_0_25px_rgba(0,240,255,0.2)] flex flex-col items-center justify-center transition-transform cursor-pointer">
                     <span class="text-lg sm:text-xl font-black text-white tracking-widest mb-1">リズムに合わせてタップ</span>
                     <span id="calLastDeltaText" class="font-cyber text-xs font-bold text-cyan-300">タップして計測開始</span>
@@ -598,10 +614,17 @@
  * ----------------------------------------------------------------------------
  * - デモモードなし（ユーザー譜面 .json/.pec + 音源 .mp3/.ogg/.wav/.m4a 読み込み専用）
  * - 画面全体ドラッグ＆ドロップ + JSZip解凍 + info.txt/info.csvメタデータ自動読込
- * - 全画面表示切替 (Fullscreen API)
+ * - 全画面表示切替 (Fullscreen API + iOS Safari疑似全画面フォールバック)
  * - Arcaea式インタラクティブ音ズレ調整 (AudioContext高精度メトロノーム計測)
+ * - ホールド落下速度正規化 & 同時押しノーツ本家風金色フレーム強調
  * ============================================================================
  */
+
+// 数値安全性チェック用ヘルパー (NaN / Infinity による描画クラッシュ防止)
+function safeNum(val, fallback = 0) {
+    const n = Number(val);
+    return Number.isFinite(n) ? n : fallback;
+}
 
 // ----------------------------------------------------------------------------
 // 1. グローバル状態管理 & 設定
@@ -609,6 +632,7 @@
 const AppState = {
     isPlaying: false,
     isPaused: false,
+    pseudoFullscreen: false,
     
     // 楽曲メタデータ
     title: "",
@@ -628,12 +652,13 @@ const AppState = {
     
     // ユーザー設定
     settings: {
-        offsetMs: 0,        // 判定オフセット (ms)
-        noteScale: 1.0,     // ノーツ幅倍率
-        bgBrightness: 0.4,  // 背景明るさ (0.1 - 0.9)
-        playbackRate: 1.0,  // 再生速度 (0.5 - 1.5)
-        autoPlay: false,    // オートプレイ
-        hitSound: true      // ヒット音有効
+        offsetMs: 0,         // 判定オフセット (ms)
+        noteScale: 1.0,      // ノーツ幅倍率
+        bgBrightness: 0.4,   // 背景明るさ (0.1 - 0.9)
+        playbackRate: 1.0,   // 再生速度 (0.5 - 1.5)
+        autoPlay: false,     // オートプレイ
+        hitSound: true,      // ヒット音有効
+        multiHighlight: true // 同時押しノーツの黄色発光ハイライト
     },
 
     // プレイ中の統計・判定データ
@@ -669,15 +694,18 @@ class SoundEngine {
     init() {
         if (!this.ctx) {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
-            this.ctx = new AudioCtx();
+            if (AudioCtx) {
+                this.ctx = new AudioCtx();
+            }
         }
-        if (this.ctx.state === 'suspended') {
-            this.ctx.resume();
+        if (this.ctx && this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(() => {});
         }
     }
 
     async decodeAudio(arrayBuffer) {
         this.init();
+        if (!this.ctx) throw new Error("Web Audio APIがサポートされていません");
         return await this.ctx.decodeAudioData(arrayBuffer);
     }
 
@@ -685,43 +713,49 @@ class SoundEngine {
     playHitSound(type = 1) {
         if (!AppState.settings.hitSound) return;
         this.init();
-        const now = this.ctx.currentTime;
+        if (!this.ctx) return;
 
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
+        try {
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
 
-        if (type === 4) {
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(1400, now);
-            osc.frequency.exponentialRampToValueAtTime(2800, now + 0.045);
-            gain.gain.setValueAtTime(0.28, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-        } else if (type === 2) {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1850, now);
-            osc.frequency.exponentialRampToValueAtTime(900, now + 0.03);
-            gain.gain.setValueAtTime(0.18, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
-        } else {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1050, now);
-            osc.frequency.exponentialRampToValueAtTime(240, now + 0.045);
-            gain.gain.setValueAtTime(0.32, now);
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            if (type === 4) {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1400, now);
+                osc.frequency.exponentialRampToValueAtTime(2800, now + 0.045);
+                gain.gain.setValueAtTime(0.28, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+            } else if (type === 2) {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1850, now);
+                osc.frequency.exponentialRampToValueAtTime(900, now + 0.03);
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+            } else {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1050, now);
+                osc.frequency.exponentialRampToValueAtTime(240, now + 0.045);
+                gain.gain.setValueAtTime(0.32, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            }
+
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(now);
+            osc.stop(now + 0.065);
+        } catch (e) {
+            // 音声再生ブロック時は無視
         }
-
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.start(now);
-        osc.stop(now + 0.065);
     }
 
     async startMusic(offsetSec = 0) {
         if (!AppState.audioBuffer) return;
         this.stopMusic();
         this.init();
+        if (!this.ctx) return;
 
-        const rate = AppState.settings.playbackRate;
+        const rate = safeNum(AppState.settings.playbackRate, 1.0);
         this.sourceNode = this.ctx.createBufferSource();
         this.sourceNode.buffer = AppState.audioBuffer;
         this.sourceNode.playbackRate.value = rate;
@@ -747,7 +781,7 @@ class SoundEngine {
     stopMusic() {
         if (this.sourceNode) {
             try { this.sourceNode.stop(); } catch (e) {}
-            this.sourceNode.disconnect();
+            try { this.sourceNode.disconnect(); } catch (e) {}
             this.sourceNode = null;
         }
         this.isRunning = false;
@@ -755,7 +789,7 @@ class SoundEngine {
 
     getCurrentTime() {
         if (!this.isRunning || !this.ctx) return this.pauseOffset;
-        const rate = AppState.settings.playbackRate;
+        const rate = safeNum(AppState.settings.playbackRate, 1.0);
         return (this.ctx.currentTime - this.startTime) * rate;
     }
 }
@@ -782,6 +816,8 @@ class OffsetCalibrator {
 
     open() {
         soundEngine.init();
+        if (!soundEngine.ctx) return;
+
         this.tempOffsetMs = AppState.settings.offsetMs;
         this.samples = [];
         this.isActive = true;
@@ -814,7 +850,6 @@ class OffsetCalibrator {
         document.getElementById('calibrationModal').classList.add('hidden');
     }
 
-    // 先読みスケジューリングでWeb Audioクロックと完全に一致したビート音を鳴らす
     scheduleBeats() {
         if (!this.isActive || !soundEngine.ctx) return;
         const lookahead = 0.12;
@@ -827,25 +862,28 @@ class OffsetCalibrator {
     }
 
     playClick(time, isAccent) {
-        const ctx = soundEngine.ctx;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+        if (!soundEngine.ctx) return;
+        try {
+            const ctx = soundEngine.ctx;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
 
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(isAccent ? 1320 : 880, time);
-        osc.frequency.exponentialRampToValueAtTime(isAccent ? 660 : 440, time + 0.04);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(isAccent ? 1320 : 880, time);
+            osc.frequency.exponentialRampToValueAtTime(isAccent ? 660 : 440, time + 0.04);
 
-        gain.gain.setValueAtTime(isAccent ? 0.45 : 0.3, time);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.055);
+            gain.gain.setValueAtTime(isAccent ? 0.45 : 0.3, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + 0.055);
 
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(time);
-        osc.stop(time + 0.06);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(time);
+            osc.stop(time + 0.06);
+        } catch (e) {}
     }
 
     updateVisualBeats() {
-        if (!this.isActive) return;
+        if (!this.isActive || !soundEngine.ctx) return;
         const now = soundEngine.ctx.currentTime;
         const elapsed = now - this.startAudioTime;
 
@@ -856,6 +894,7 @@ class OffsetCalibrator {
 
             for (let i = 0; i < 4; i++) {
                 const dot = document.getElementById(`calBeat${i}`);
+                if (!dot) continue;
                 if (i === currentBeatInBar && beatProgress < 0.35) {
                     dot.className = i === 0
                         ? 'w-6 h-6 rounded-full bg-amber-400 shadow-[0_0_16px_#ffd700] scale-110 transition-all duration-75'
@@ -881,19 +920,16 @@ class OffsetCalibrator {
         const nearestBeatTime = this.startAudioTime + nearestBeatNum * this.beatInterval;
         const deltaMs = (tapTime - nearestBeatTime) * 1000;
 
-        // 極端な誤タップ（±220ms超）を除外
-        if (Math.abs(deltaMs) > 220) return;
+        if (!Number.isFinite(deltaMs) || Math.abs(deltaMs) > 220) return;
 
         this.samples.push(deltaMs);
         if (this.samples.length > 24) {
-            this.samples.shift(); // 直近24回を保持
+            this.samples.shift();
         }
 
-        // 平均値を算出（四捨五入）
         const sum = this.samples.reduce((a, b) => a + b, 0);
         this.tempOffsetMs = Math.round(sum / this.samples.length);
 
-        // 今回の単発タップ表示
         const sign = deltaMs > 0 ? '+' : '';
         const label = Math.abs(deltaMs) < 8 ? 'JUST!' : (deltaMs < 0 ? 'EARLY' : 'LATE');
         document.getElementById('calLastDeltaText').textContent = `直近タップ: ${sign}${Math.round(deltaMs)} ms (${label})`;
@@ -904,7 +940,7 @@ class OffsetCalibrator {
 
     addMarker(deltaMs) {
         const container = document.getElementById('calMarkersContainer');
-        // -150ms ~ +150ms を 0% ~ 100% にマッピング
+        if (!container) return;
         const clamped = Math.max(-150, Math.min(150, deltaMs));
         const pct = ((clamped + 150) / 300) * 100;
 
@@ -915,7 +951,6 @@ class OffsetCalibrator {
         marker.style.opacity = '0.85';
         container.appendChild(marker);
 
-        // 古いマーカーをフェードアウト
         if (container.children.length > 16) {
             container.removeChild(container.firstChild);
         }
@@ -959,22 +994,50 @@ const calibrator = new OffsetCalibrator();
 // 4. 譜面パーサー（Phigros公式JSON形式 & PEC形式）
 // ----------------------------------------------------------------------------
 class ChartParser {
+    // 全判定ラインを横断して同タイミング（±2ms以内）の同時押しノーツを検出しフラグを付与
+    static markSimultaneousNotes(judgeLines) {
+        if (!Array.isArray(judgeLines)) return;
+        const allNotes = [];
+        judgeLines.forEach(line => {
+            if (!line || !Array.isArray(line.notes)) return;
+            line.notes.forEach(n => {
+                n.isHighlight = false;
+                if (Number.isFinite(n.time)) {
+                    allNotes.push(n);
+                }
+            });
+        });
+
+        allNotes.sort((a, b) => a.time - b.time);
+
+        for (let i = 1; i < allNotes.length; i++) {
+            if (Math.abs(allNotes[i].time - allNotes[i - 1].time) <= 0.002) {
+                allNotes[i].isHighlight = true;
+                allNotes[i - 1].isHighlight = true;
+            }
+        }
+    }
+
     static parseOfficialJSON(jsonObj) {
-        const formatVersion = jsonObj.formatVersion || 3;
-        const offset = jsonObj.offset || 0;
+        const formatVersion = safeNum(jsonObj.formatVersion, 3);
+        const offset = safeNum(jsonObj.offset, 0);
         const judgeLines = [];
         let totalNotes = 0;
 
         (jsonObj.judgeLineList || []).forEach((line, lineIdx) => {
-            const bpm = line.bpm || 120;
-            const beatToSec = (t) => (t / 32) * (60 / bpm);
+            const bpm = Math.max(1, safeNum(line.bpm, 120));
+            const beatToSec = (t) => (safeNum(t, 0) / 32) * (60 / bpm);
 
-            const speedEvents = (line.speedEvents || [{ startTime: 0, endTime: 999999, value: 1.0 }])
+            const rawSpeedEvents = (Array.isArray(line.speedEvents) && line.speedEvents.length > 0)
+                ? line.speedEvents
+                : [{ startTime: 0, endTime: 999999, value: 1.0 }];
+
+            const speedEvents = rawSpeedEvents
                 .map(e => ({
                     startTime: beatToSec(e.startTime),
                     endTime: beatToSec(e.endTime),
-                    value: e.value,
-                    floorPosition: e.floorPosition || 0
+                    value: safeNum(e.value, 1.0),
+                    floorPosition: safeNum(e.floorPosition, 0)
                 }))
                 .sort((a, b) => a.startTime - b.startTime);
 
@@ -985,64 +1048,81 @@ class ChartParser {
                 currentPos += dur * speedEvents[i].value;
             }
 
-            const moveEvents = (line.judgeLineMoveEvents || [{ startTime: 0, endTime: 999999, start: 0.5, end: 0.5, start2: 0.2, end2: 0.2 }])
-                .map(e => {
-                    if (formatVersion === 1) {
-                        const sx = Math.floor(e.start / 1000) / 880;
-                        const sy = (e.start % 1000) / 520;
-                        const ex = Math.floor(e.end / 1000) / 880;
-                        const ey = (e.end % 1000) / 520;
-                        return {
-                            startTime: beatToSec(e.startTime),
-                            endTime: beatToSec(e.endTime),
-                            startX: sx, endX: ex,
-                            startY: sy, endY: ey
-                        };
-                    } else {
-                        return {
-                            startTime: beatToSec(e.startTime),
-                            endTime: beatToSec(e.endTime),
-                            startX: e.start, endX: e.end,
-                            startY: e.start2, endY: e.end2
-                        };
-                    }
-                });
+            const rawMoveEvents = (Array.isArray(line.judgeLineMoveEvents) && line.judgeLineMoveEvents.length > 0)
+                ? line.judgeLineMoveEvents
+                : [{ startTime: 0, endTime: 999999, start: 0.5, end: 0.5, start2: 0.2, end2: 0.2 }];
 
-            const rotateEvents = (line.judgeLineRotateEvents || [{ startTime: 0, endTime: 999999, start: 0, end: 0 }])
-                .map(e => ({
-                    startTime: beatToSec(e.startTime),
-                    endTime: beatToSec(e.endTime),
-                    start: e.start,
-                    end: e.end
-                }));
+            const moveEvents = rawMoveEvents.map(e => {
+                if (formatVersion === 1) {
+                    const s = safeNum(e.start, 440104);
+                    const en = safeNum(e.end, 440104);
+                    const sx = Math.floor(s / 1000) / 880;
+                    const sy = (s % 1000) / 520;
+                    const ex = Math.floor(en / 1000) / 880;
+                    const ey = (en % 1000) / 520;
+                    return {
+                        startTime: beatToSec(e.startTime),
+                        endTime: beatToSec(e.endTime),
+                        startX: sx, endX: ex,
+                        startY: sy, endY: ey
+                    };
+                } else {
+                    return {
+                        startTime: beatToSec(e.startTime),
+                        endTime: beatToSec(e.endTime),
+                        startX: safeNum(e.start, 0.5),
+                        endX: safeNum(e.end, 0.5),
+                        startY: safeNum(e.start2, 0.2),
+                        endY: safeNum(e.end2, 0.2)
+                    };
+                }
+            });
 
-            const alphaEvents = (line.judgeLineDisappearEvents || [{ startTime: 0, endTime: 999999, start: 1, end: 1 }])
-                .map(e => ({
-                    startTime: beatToSec(e.startTime),
-                    endTime: beatToSec(e.endTime),
-                    start: e.start,
-                    end: e.end
-                }));
+            const rawRotateEvents = (Array.isArray(line.judgeLineRotateEvents) && line.judgeLineRotateEvents.length > 0)
+                ? line.judgeLineRotateEvents
+                : [{ startTime: 0, endTime: 999999, start: 0, end: 0 }];
+
+            const rotateEvents = rawRotateEvents.map(e => ({
+                startTime: beatToSec(e.startTime),
+                endTime: beatToSec(e.endTime),
+                start: safeNum(e.start, 0),
+                end: safeNum(e.end, 0)
+            }));
+
+            const rawAlphaEvents = (Array.isArray(line.judgeLineDisappearEvents) && line.judgeLineDisappearEvents.length > 0)
+                ? line.judgeLineDisappearEvents
+                : [{ startTime: 0, endTime: 999999, start: 1, end: 1 }];
+
+            const alphaEvents = rawAlphaEvents.map(e => ({
+                startTime: beatToSec(e.startTime),
+                endTime: beatToSec(e.endTime),
+                start: safeNum(e.start, 1),
+                end: safeNum(e.end, 1)
+            }));
 
             const notes = [];
             const processNoteList = (rawList, isAbove) => {
-                (rawList || []).forEach(n => {
+                if (!Array.isArray(rawList)) return;
+                rawList.forEach(n => {
+                    const noteType = safeNum(n.type, 1);
                     const hitTime = beatToSec(n.time);
-                    const holdDur = n.type === 3 ? beatToSec(n.holdTime) : 0;
+                    const holdDur = noteType === 3 ? Math.max(0, beatToSec(n.holdTime)) : 0;
                     const floorPos = this.calcFloorPosition(speedEvents, hitTime);
-                    const endFloorPos = n.type === 3 ? this.calcFloorPosition(speedEvents, hitTime + holdDur) : floorPos;
+                    const endFloorPos = noteType === 3 ? this.calcFloorPosition(speedEvents, hitTime + holdDur) : floorPos;
 
                     notes.push({
                         id: `${lineIdx}_${notes.length}`,
-                        type: n.type,
+                        type: noteType,
                         time: hitTime,
                         holdTime: holdDur,
                         endTime: hitTime + holdDur,
-                        positionX: n.positionX * 0.05625,
-                        speed: n.speed || 1.0,
+                        positionX: safeNum(n.positionX, 0) * 0.05625,
+                        speed: Math.max(0, safeNum(n.speed, 1.0)),
+                        isHoldLengthSpeed: true,
                         floorPosition: floorPos,
                         endFloorPosition: endFloorPos,
-                        isAbove: isAbove,
+                        isAbove: Boolean(isAbove),
+                        isHighlight: false,
                         judged: false,
                         isHolding: false,
                         holdTickTimer: 0,
@@ -1066,6 +1146,7 @@ class ChartParser {
             });
         });
 
+        this.markSimultaneousNotes(judgeLines);
         return { offset, judgeLines, totalNotes };
     }
 
@@ -1090,20 +1171,21 @@ class ChartParser {
             return lineMap.get(id);
         };
 
-        if (lines.length > 0 && !isNaN(Number(lines[0]))) {
+        if (lines.length > 0 && Number.isFinite(Number(lines[0]))) {
             offset = Number(lines[0]) / 1000;
         }
 
         const beatToSec = (beat) => {
-            if (bpms.length === 0) return beat * 0.5;
+            const b = safeNum(beat, 0);
+            if (bpms.length === 0) return b * 0.5;
             let sec = 0;
             for (let i = 0; i < bpms.length; i++) {
                 const curr = bpms[i];
                 const nextBeat = (i + 1 < bpms.length) ? bpms[i + 1].beat : Infinity;
-                if (beat >= nextBeat) {
+                if (b >= nextBeat) {
                     sec += (nextBeat - curr.beat) * (60 / curr.bpm);
                 } else {
-                    sec += Math.max(0, beat - curr.beat) * (60 / curr.bpm);
+                    sec += Math.max(0, b - curr.beat) * (60 / curr.bpm);
                     break;
                 }
             }
@@ -1116,49 +1198,63 @@ class ChartParser {
             const p = raw.split(/\s+/);
             const cmd = p[0];
 
-            if (cmd === 'bp') {
-                bpms.push({ beat: Number(p[1]), bpm: Number(p[2]) });
+            if (cmd === 'bp' && p.length >= 3) {
+                const bpmVal = Math.max(1, safeNum(p[2], 120));
+                bpms.push({ beat: safeNum(p[1], 0), bpm: bpmVal });
                 bpms.sort((a, b) => a.beat - b.beat);
-            } else if (cmd === 'cp') {
-                const l = getLine(Number(p[1]));
-                const t = beatToSec(Number(p[2]));
-                l.moveEvents.push({ startTime: t, endTime: t, startX: Number(p[3]) / 2048, endX: Number(p[3]) / 2048, startY: Number(p[4]) / 1400, endY: Number(p[4]) / 1400 });
-            } else if (cmd === 'cm') {
-                const l = getLine(Number(p[1]));
-                l.moveEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), startX: null, endX: Number(p[4]) / 2048, startY: null, endY: Number(p[5]) / 1400 });
-            } else if (cmd === 'cd') {
-                const l = getLine(Number(p[1]));
-                const t = beatToSec(Number(p[2]));
-                l.rotateEvents.push({ startTime: t, endTime: t, start: -Number(p[3]), end: -Number(p[3]) });
-            } else if (cmd === 'cr') {
-                const l = getLine(Number(p[1]));
-                l.rotateEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), start: null, end: -Number(p[4]) });
-            } else if (cmd === 'ca') {
-                const l = getLine(Number(p[1]));
-                const t = beatToSec(Number(p[2]));
-                const a = Math.max(0, Number(p[3])) / 255;
+            } else if (cmd === 'cp' && p.length >= 5) {
+                const l = getLine(safeNum(p[1], 0));
+                const t = beatToSec(p[2]);
+                l.moveEvents.push({
+                    startTime: t, endTime: t,
+                    startX: safeNum(p[3], 1024) / 2048,
+                    endX: safeNum(p[3], 1024) / 2048,
+                    startY: safeNum(p[4], 280) / 1400,
+                    endY: safeNum(p[4], 280) / 1400
+                });
+            } else if (cmd === 'cm' && p.length >= 6) {
+                const l = getLine(safeNum(p[1], 0));
+                l.moveEvents.push({
+                    startTime: beatToSec(p[2]),
+                    endTime: beatToSec(p[3]),
+                    startX: null,
+                    endX: safeNum(p[4], 1024) / 2048,
+                    startY: null,
+                    endY: safeNum(p[5], 280) / 1400
+                });
+            } else if (cmd === 'cd' && p.length >= 4) {
+                const l = getLine(safeNum(p[1], 0));
+                const t = beatToSec(p[2]);
+                l.rotateEvents.push({ startTime: t, endTime: t, start: -safeNum(p[3], 0), end: -safeNum(p[3], 0) });
+            } else if (cmd === 'cr' && p.length >= 5) {
+                const l = getLine(safeNum(p[1], 0));
+                l.rotateEvents.push({ startTime: beatToSec(p[2]), endTime: beatToSec(p[3]), start: null, end: -safeNum(p[4], 0) });
+            } else if (cmd === 'ca' && p.length >= 4) {
+                const l = getLine(safeNum(p[1], 0));
+                const t = beatToSec(p[2]);
+                const a = Math.max(0, safeNum(p[3], 255)) / 255;
                 l.alphaEvents.push({ startTime: t, endTime: t, start: a, end: a });
-            } else if (cmd === 'cf') {
-                const l = getLine(Number(p[1]));
-                const a = Math.max(0, Number(p[4])) / 255;
-                l.alphaEvents.push({ startTime: beatToSec(Number(p[2])), endTime: beatToSec(Number(p[3])), start: null, end: a });
-            } else if (cmd === 'cv') {
-                const l = getLine(Number(p[1]));
-                l.speedEvents.push({ startTime: beatToSec(Number(p[2])), endTime: 999999, value: Number(p[3]) / 7.0 });
-            } else if (['n1', 'n2', 'n3', 'n4'].includes(cmd)) {
-                const l = getLine(Number(p[1]));
-                const t = beatToSec(Number(p[2]));
+            } else if (cmd === 'cf' && p.length >= 5) {
+                const l = getLine(safeNum(p[1], 0));
+                const a = Math.max(0, safeNum(p[4], 255)) / 255;
+                l.alphaEvents.push({ startTime: beatToSec(p[2]), endTime: beatToSec(p[3]), start: null, end: a });
+            } else if (cmd === 'cv' && p.length >= 4) {
+                const l = getLine(safeNum(p[1], 0));
+                l.speedEvents.push({ startTime: beatToSec(p[2]), endTime: 999999, value: safeNum(p[3], 7.0) / 7.0 });
+            } else if (['n1', 'n2', 'n3', 'n4'].includes(cmd) && p.length >= 5) {
+                const l = getLine(safeNum(p[1], 0));
+                const t = beatToSec(p[2]);
                 const typeMap = { n1: 1, n2: 3, n3: 4, n4: 2 };
                 const type = typeMap[cmd];
                 let endT = t;
                 let posX, above;
-                if (cmd === 'n2') {
-                    endT = beatToSec(Number(p[3]));
-                    posX = Number(p[4]) / 2048;
-                    above = Number(p[5]) === 1;
+                if (cmd === 'n2' && p.length >= 6) {
+                    endT = Math.max(t, beatToSec(p[3]));
+                    posX = safeNum(p[4], 0) / 2048;
+                    above = safeNum(p[5], 1) === 1;
                 } else {
-                    posX = Number(p[3]) / 2048;
-                    above = Number(p[4]) === 1;
+                    posX = safeNum(p[3], 0) / 2048;
+                    above = safeNum(p[4], 1) === 1;
                 }
                 lastNote = {
                     id: `pec_${l.id}_${l.notes.length}`,
@@ -1168,17 +1264,19 @@ class ChartParser {
                     endTime: endT,
                     positionX: posX,
                     speed: 1.0,
+                    isHoldLengthSpeed: false,
                     floorPosition: 0,
                     endFloorPosition: 0,
                     isAbove: above,
+                    isHighlight: false,
                     judged: false,
                     isHolding: false,
                     holdTickTimer: 0,
                     hitResult: null
                 };
                 l.notes.push(lastNote);
-            } else if (cmd === '#' && lastNote) {
-                lastNote.speed = Number(p[1]);
+            } else if (cmd === '#' && lastNote && p.length >= 2) {
+                lastNote.speed = Math.max(0, safeNum(p[1], 1.0));
             }
         });
 
@@ -1193,22 +1291,30 @@ class ChartParser {
                     l.moveEvents[i].startY = i > 0 ? l.moveEvents[i - 1].endY : 0.2;
                 }
             }
-            if (l.moveEvents.length === 0) l.moveEvents.push({ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.2, endY: 0.2 });
+            if (l.moveEvents.length === 0) {
+                l.moveEvents.push({ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.2, endY: 0.2 });
+            }
 
             l.rotateEvents.sort((a, b) => a.startTime - b.startTime);
             for (let i = 0; i < l.rotateEvents.length; i++) {
                 if (l.rotateEvents[i].start === null) l.rotateEvents[i].start = i > 0 ? l.rotateEvents[i - 1].end : 0;
             }
-            if (l.rotateEvents.length === 0) l.rotateEvents.push({ startTime: 0, endTime: 999999, start: 0, end: 0 });
+            if (l.rotateEvents.length === 0) {
+                l.rotateEvents.push({ startTime: 0, endTime: 999999, start: 0, end: 0 });
+            }
 
             l.alphaEvents.sort((a, b) => a.startTime - b.startTime);
             for (let i = 0; i < l.alphaEvents.length; i++) {
                 if (l.alphaEvents[i].start === null) l.alphaEvents[i].start = i > 0 ? l.alphaEvents[i - 1].end : 1;
             }
-            if (l.alphaEvents.length === 0) l.alphaEvents.push({ startTime: 0, endTime: 999999, start: 1, end: 1 });
+            if (l.alphaEvents.length === 0) {
+                l.alphaEvents.push({ startTime: 0, endTime: 999999, start: 1, end: 1 });
+            }
 
             l.speedEvents.sort((a, b) => a.startTime - b.startTime);
-            if (l.speedEvents.length === 0) l.speedEvents.push({ startTime: 0, endTime: 999999, value: 1.0 });
+            if (l.speedEvents.length === 0) {
+                l.speedEvents.push({ startTime: 0, endTime: 999999, value: 1.0 });
+            }
             let pos = 0;
             for (let i = 0; i < l.speedEvents.length; i++) {
                 if (i + 1 < l.speedEvents.length) l.speedEvents[i].endTime = l.speedEvents[i + 1].startTime;
@@ -1225,19 +1331,21 @@ class ChartParser {
             judgeLines.push(l);
         });
 
+        this.markSimultaneousNotes(judgeLines);
         return { offset, judgeLines, totalNotes };
     }
 
     static calcFloorPosition(speedEvents, time) {
-        if (!speedEvents || speedEvents.length === 0) return time;
+        const t = safeNum(time, 0);
+        if (!Array.isArray(speedEvents) || speedEvents.length === 0) return t;
         for (let i = 0; i < speedEvents.length; i++) {
             const ev = speedEvents[i];
-            if (time >= ev.startTime && time <= ev.endTime) {
-                return ev.floorPosition + (time - ev.startTime) * ev.value;
+            if (t >= ev.startTime && t <= ev.endTime) {
+                return safeNum(ev.floorPosition, 0) + (t - ev.startTime) * safeNum(ev.value, 1.0);
             }
         }
         const last = speedEvents[speedEvents.length - 1];
-        return last.floorPosition + (time - last.startTime) * last.value;
+        return safeNum(last.floorPosition, 0) + (t - last.startTime) * safeNum(last.value, 1.0);
     }
 }
 
@@ -1246,6 +1354,7 @@ class ChartParser {
 // ----------------------------------------------------------------------------
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
+    if (!container) return;
     const toast = document.createElement('div');
     const colors = {
         info: 'bg-slate-900/95 border-cyan-400 text-cyan-200',
@@ -1263,7 +1372,6 @@ function showToast(message, type = 'info') {
     }, 3500);
 }
 
-// アセット読み込み状態に応じてUIとプレイ開始ボタンの有効/無効を更新
 function updateAssetStatusUI() {
     const hasChart = Boolean(AppState.chart && AppState.totalNotes > 0);
     const hasAudio = Boolean(AppState.audioBuffer);
@@ -1394,7 +1502,7 @@ async function handleIncomingFiles(fileList) {
             try {
                 const text = await getText();
                 const obj = JSON.parse(text);
-                if (obj.judgeLineList) {
+                if (obj && obj.judgeLineList) {
                     const parsed = ChartParser.parseOfficialJSON(obj);
                     if (parsed.totalNotes > 0) {
                         AppState.chart = parsed;
@@ -1480,6 +1588,10 @@ async function handleIncomingFiles(fileList) {
     for (const file of files) {
         if (file.name.toLowerCase().endsWith('.zip')) {
             try {
+                if (typeof JSZip === 'undefined') {
+                    showToast("ZIP解凍ライブラリの読み込みに失敗しました。個別ファイルで選択してください。", 'error');
+                    continue;
+                }
                 showToast(`ZIPファイルを展開中: ${file.name}...`, 'info');
                 const zip = await JSZip.loadAsync(file);
                 const entries = Object.values(zip.files).filter(entry => !entry.dir && !entry.name.startsWith('__MACOSX'));
@@ -1559,10 +1671,11 @@ window.addEventListener('drop', async (e) => {
 }, false);
 
 // ----------------------------------------------------------------------------
-// 6. 全画面表示切替 (Fullscreen API)
+// 6. 全画面表示切替 (Fullscreen API + iOS Safari疑似全画面フォールバック)
 // ----------------------------------------------------------------------------
 function updateFullscreenLabels() {
-    const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    const isNativeFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    const isFs = isNativeFs || AppState.pseudoFullscreen;
     document.querySelectorAll('.fsBtnLabel').forEach(el => {
         el.textContent = isFs ? '全画面解除' : '全画面';
     });
@@ -1570,16 +1683,28 @@ function updateFullscreenLabels() {
 
 async function toggleFullscreen() {
     const docEl = document.documentElement;
-    const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    const isNativeFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+
+    if (AppState.pseudoFullscreen) {
+        AppState.pseudoFullscreen = false;
+        document.body.classList.remove('pseudo-fullscreen');
+        resizeCanvas();
+        updateFullscreenLabels();
+        return;
+    }
 
     try {
-        if (!isFs) {
+        if (!isNativeFs) {
             if (docEl.requestFullscreen) {
                 await docEl.requestFullscreen();
             } else if (docEl.webkitRequestFullscreen) {
                 await docEl.webkitRequestFullscreen();
             } else {
-                showToast("このブラウザでは全画面APIが制限されています。「ホーム画面に追加」で全画面表示が可能です。", 'info');
+                // iOS SafariなどFullscreen API未対応環境では疑似全画面モードを有効化
+                AppState.pseudoFullscreen = true;
+                document.body.classList.add('pseudo-fullscreen');
+                window.scrollTo(0, 1);
+                resizeCanvas();
             }
         } else {
             if (document.exitFullscreen) {
@@ -1589,7 +1714,10 @@ async function toggleFullscreen() {
             }
         }
     } catch (err) {
-        showToast("全画面表示の切り替えがブラウザにより制限されました", 'info');
+        // ブラウザ制限時は疑似全画面へフォールバック
+        AppState.pseudoFullscreen = !AppState.pseudoFullscreen;
+        document.body.classList.toggle('pseudo-fullscreen', AppState.pseudoFullscreen);
+        resizeCanvas();
     }
     updateFullscreenLabels();
 }
@@ -1618,30 +1746,33 @@ function resizeCanvas() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.style.width = `${drawW}px`;
     canvas.style.height = `${drawH}px`;
-    canvas.width = Math.floor(drawW * dpr);
-    canvas.height = Math.floor(drawH * dpr);
+    canvas.width = Math.max(1, Math.floor(drawW * dpr));
+    canvas.height = Math.max(1, Math.floor(drawH * dpr));
 }
 window.addEventListener('resize', resizeCanvas);
 
 function getInterpolatedValue(events, time, keyStart, keyEnd, defaultVal) {
-    if (!events || events.length === 0) return defaultVal;
+    if (!Array.isArray(events) || events.length === 0) return defaultVal;
+    const t = safeNum(time, 0);
     for (let i = 0; i < events.length; i++) {
         const ev = events[i];
-        if (time >= ev.startTime && time <= ev.endTime) {
+        if (t >= ev.startTime && t <= ev.endTime) {
             const dur = ev.endTime - ev.startTime;
-            if (dur <= 0) return ev[keyEnd];
-            const progress = (time - ev.startTime) / dur;
-            return ev[keyStart] + (ev[keyEnd] - ev[keyStart]) * progress;
+            if (dur <= 0) return safeNum(ev[keyEnd], defaultVal);
+            const progress = (t - ev.startTime) / dur;
+            const sVal = safeNum(ev[keyStart], defaultVal);
+            const eVal = safeNum(ev[keyEnd], defaultVal);
+            return sVal + (eVal - sVal) * progress;
         }
     }
-    if (time < events[0].startTime) return events[0][keyStart];
-    return events[events.length - 1][keyEnd];
+    if (t < events[0].startTime) return safeNum(events[0][keyStart], defaultVal);
+    return safeNum(events[events.length - 1][keyEnd], defaultVal);
 }
 
 const JUDGE_WINDOW = {
     PERFECT: 0.080,
     GOOD: 0.160,
-    BAD: 0.220
+    BAD: 0.180
 };
 
 function registerJudgement(result, note, lineScreenX, lineScreenY) {
@@ -1669,22 +1800,27 @@ function registerJudgement(result, note, lineScreenX, lineScreenY) {
     const comboScore = (stats.maxCombo / total) * 100000;
     stats.score = Math.round(accScore + comboScore);
 
+    const sx = safeNum(lineScreenX, canvas.width * 0.5);
+    const sy = safeNum(lineScreenY, canvas.height * 0.5);
+
     if (result === 'PERFECT' || result === 'GOOD') {
         soundEngine.playHitSound(note.type);
-        spawnHitEffect(lineScreenX, lineScreenY, result === 'PERFECT' ? '#ffd700' : '#00f0ff');
+        spawnHitEffect(sx, sy, result === 'PERFECT' ? '#ffd700' : '#00f0ff');
     }
 
     AppState.judgePopups.push({
         text: result,
         color: result === 'PERFECT' ? '#ffd700' : (result === 'GOOD' ? '#00f0ff' : (result === 'BAD' ? '#c084fc' : '#fb7185')),
-        x: lineScreenX,
-        y: lineScreenY - 25,
+        x: sx,
+        y: sy - 25,
         alpha: 1.0,
         vy: -45
     });
 }
 
 function spawnHitEffect(x, y, color) {
+    const sx = safeNum(x, 0);
+    const sy = safeNum(y, 0);
     const particles = [];
     for (let i = 0; i < 8; i++) {
         const ang = (Math.PI * 2 * i) / 8 + (Math.random() * 0.4);
@@ -1696,7 +1832,9 @@ function spawnHitEffect(x, y, color) {
         });
     }
     AppState.effects.push({
-        x, y, color,
+        x: sx,
+        y: sy,
+        color,
         age: 0,
         maxAge: 0.36,
         particles
@@ -1708,8 +1846,10 @@ function spawnHitEffect(x, y, color) {
 // ----------------------------------------------------------------------------
 function getCanvasCoords(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const w = Math.max(1, rect.width);
+    const h = Math.max(1, rect.height);
+    const scaleX = canvas.width / w;
+    const scaleY = canvas.height / h;
     return {
         x: (clientX - rect.left) * scaleX,
         y: (clientY - rect.top) * scaleY
@@ -1839,255 +1979,343 @@ let lastFrameTime = performance.now();
 function updateAndRender(now) {
     requestAnimationFrame(updateAndRender);
 
-    const dt = Math.min(0.05, (now - lastFrameTime) / 1000);
+    const dt = Math.min(0.05, Math.max(0, (now - lastFrameTime) / 1000));
     lastFrameTime = now;
 
     const W = canvas.width;
     const H = canvas.height;
-    if (W === 0 || H === 0) return;
+    if (W <= 0 || H <= 0) return;
 
-    ctx.clearRect(0, 0, W, H);
-    drawBackground(W, H);
+    try {
+        ctx.clearRect(0, 0, W, H);
+        drawBackground(W, H);
 
-    if (!AppState.isPlaying || !AppState.chart) {
-        return;
-    }
-
-    // 現在の楽曲時刻（譜面オフセット + Arcaea式音ズレ調整オフセット適用）
-    const rawTime = soundEngine.getCurrentTime();
-    const chartTime = rawTime - (AppState.chart.offset || 0) - (AppState.settings.offsetMs / 1000);
-
-    // 楽曲終了チェック
-    if (!AppState.isPaused && rawTime >= AppState.audioDuration + 1.0) {
-        finishGame();
-        return;
-    }
-
-    const noteWidthBase = W * 0.125 * AppState.settings.noteScale;
-    const noteHeightBase = Math.max(10, H * 0.018 * AppState.settings.noteScale);
-    const speedScaleY = H * 0.62;
-
-    AppState.chart.judgeLines.forEach(line => {
-        const normX = getInterpolatedValue(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
-        const normY = getInterpolatedValue(line.moveEvents, chartTime, 'startY', 'endY', 0.2);
-        const deg = getInterpolatedValue(line.rotateEvents, chartTime, 'start', 'end', 0);
-        const alpha = Math.max(0, Math.min(1, getInterpolatedValue(line.alphaEvents, chartTime, 'start', 'end', 1)));
-
-        const lineX = normX * W;
-        const lineY = (1 - normY) * H;
-        const rad = (-deg * Math.PI) / 180;
-
-        const currentFloorPos = ChartParser.calcFloorPosition(line.speedEvents, chartTime);
-
-        ctx.save();
-        ctx.translate(lineX, lineY);
-        ctx.rotate(rad);
-
-        if (alpha > 0.01) {
-            ctx.globalAlpha = alpha;
-            const lineColor = (AppState.stats.bad === 0 && AppState.stats.miss === 0) ? '#ffd700' : '#ffffff';
-            ctx.strokeStyle = lineColor;
-            ctx.lineWidth = Math.max(3, H * 0.0055);
-            ctx.shadowColor = lineColor === '#ffd700' ? 'rgba(255, 215, 0, 0.8)' : 'rgba(0, 240, 255, 0.6)';
-            ctx.shadowBlur = 10;
-
-            const lineLen = Math.hypot(W, H) * 1.5;
-            ctx.beginPath();
-            ctx.moveTo(-lineLen, 0);
-            ctx.lineTo(lineLen, 0);
-            ctx.stroke();
-            ctx.shadowBlur = 0;
+        if (!AppState.isPlaying || !AppState.chart) {
+            return;
         }
 
-        const cosA = Math.cos(rad);
-        const sinA = Math.sin(rad);
+        // 現在の楽曲時刻（譜面オフセット + Arcaea式音ズレ調整オフセット適用）
+        const rawTime = safeNum(soundEngine.getCurrentTime(), 0);
+        const chartTime = rawTime - safeNum(AppState.chart.offset, 0) - (safeNum(AppState.settings.offsetMs, 0) / 1000);
 
-        for (let i = 0; i < line.notes.length; i++) {
-            const note = line.notes[i];
-            if (note.judged) continue;
+        // 楽曲終了チェック
+        if (!AppState.isPaused && rawTime >= AppState.audioDuration + 1.0) {
+            finishGame();
+            return;
+        }
 
-            const timeDiff = note.time - chartTime;
-            const localX = note.positionX * W;
-            const dir = note.isAbove ? -1 : 1;
+        const noteScale = safeNum(AppState.settings.noteScale, 1.0);
+        const noteWidthBase = W * 0.125 * noteScale;
+        const noteHeightBase = Math.max(10, H * 0.018 * noteScale);
+        const speedScaleY = H * 0.62;
 
-            const worldNoteX = lineX + localX * cosA;
-            const worldNoteY = lineY + localX * sinA;
+        AppState.chart.judgeLines.forEach(line => {
+            const normX = getInterpolatedValue(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
+            const normY = getInterpolatedValue(line.moveEvents, chartTime, 'startY', 'endY', 0.2);
+            const deg = getInterpolatedValue(line.rotateEvents, chartTime, 'start', 'end', 0);
+            const alpha = Math.max(0, Math.min(1, getInterpolatedValue(line.alphaEvents, chartTime, 'start', 'end', 1)));
 
-            if (!AppState.isPaused) {
-                if (AppState.settings.autoPlay) {
-                    if (note.type === 3) {
-                        if (chartTime >= note.time && !note.isHolding) {
-                            note.isHolding = true;
-                            soundEngine.playHitSound(3);
-                            spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
-                        }
-                        if (note.isHolding) {
-                            note.holdTickTimer += dt;
-                            if (note.holdTickTimer >= 0.14) {
-                                note.holdTickTimer = 0;
+            const lineX = normX * W;
+            const lineY = (1 - normY) * H;
+            const rad = (-deg * Math.PI) / 180;
+
+            const currentFloorPos = ChartParser.calcFloorPosition(line.speedEvents, chartTime);
+
+            ctx.save();
+            ctx.translate(lineX, lineY);
+            ctx.rotate(rad);
+
+            if (alpha > 0.01) {
+                ctx.globalAlpha = alpha;
+                const lineColor = (AppState.stats.bad === 0 && AppState.stats.miss === 0) ? '#ffd700' : '#ffffff';
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = Math.max(3, H * 0.0055);
+                ctx.shadowColor = lineColor === '#ffd700' ? 'rgba(255, 215, 0, 0.8)' : 'rgba(0, 240, 255, 0.6)';
+                ctx.shadowBlur = 10;
+
+                const lineLen = Math.hypot(W, H) * 1.5;
+                ctx.beginPath();
+                ctx.moveTo(-lineLen, 0);
+                ctx.lineTo(lineLen, 0);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+            }
+
+            const cosA = Math.cos(rad);
+            const sinA = Math.sin(rad);
+
+            for (let i = 0; i < line.notes.length; i++) {
+                const note = line.notes[i];
+                if (!note || note.judged) continue;
+
+                const timeDiff = note.time - chartTime;
+                const localX = safeNum(note.positionX, 0) * W;
+                const dir = note.isAbove ? -1 : 1;
+
+                const worldNoteX = lineX + localX * cosA;
+                const worldNoteY = lineY + localX * sinA;
+
+                // ----------------------------------------------------------------
+                // 判定ロジック (オートプレイ / 手動マルチタッチ)
+                // ----------------------------------------------------------------
+                if (!AppState.isPaused) {
+                    if (AppState.settings.autoPlay) {
+                        if (note.type === 3) {
+                            if (chartTime >= note.time && !note.isHolding) {
+                                note.isHolding = true;
+                                soundEngine.playHitSound(3);
                                 spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
                             }
-                            if (chartTime >= note.endTime) {
+                            if (note.isHolding) {
+                                note.holdTickTimer += dt;
+                                if (note.holdTickTimer >= 0.14) {
+                                    note.holdTickTimer = 0;
+                                    spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
+                                }
+                                if (chartTime >= note.endTime) {
+                                    note.judged = true;
+                                    registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                                    continue;
+                                }
+                            }
+                        } else if (chartTime >= note.time) {
+                            note.judged = true;
+                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
+                            continue;
+                        }
+                    } else {
+                        const absDiff = Math.abs(timeDiff);
+                        const hitRadius = Math.max(noteWidthBase * 1.15, W * 0.11);
+
+                        let matchedPointer = null;
+                        for (const [, ptr] of AppState.pointers) {
+                            if (ptr.isKeyboard) {
+                                matchedPointer = ptr;
+                                break;
+                            }
+                            const relX = ptr.x - lineX;
+                            const relY = ptr.y - lineY;
+                            const projX = relX * cosA + relY * sinA;
+                            const projY = -relX * sinA + relY * cosA;
+
+                            if (Math.abs(projX - localX) <= hitRadius && Math.abs(projY) <= H * 0.45) {
+                                matchedPointer = ptr;
+                                break;
+                            }
+                        }
+
+                        if (note.type === 1) {
+                            // Tap
+                            if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
+                                matchedPointer.justPressed = false;
+                                note.judged = true;
+                                const res = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : (absDiff <= JUDGE_WINDOW.GOOD ? 'GOOD' : 'BAD');
+                                registerJudgement(res, note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                            if (timeDiff < -JUDGE_WINDOW.BAD) {
+                                note.judged = true;
+                                registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                        } else if (note.type === 2) {
+                            // Drag
+                            if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
                                 note.judged = true;
                                 registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
                                 continue;
                             }
-                        }
-                    } else if (chartTime >= note.time) {
-                        note.judged = true;
-                        registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
-                        continue;
-                    }
-                } else {
-                    const absDiff = Math.abs(timeDiff);
-                    const hitRadius = Math.max(noteWidthBase * 1.15, W * 0.11);
-
-                    let matchedPointer = null;
-                    for (const [, ptr] of AppState.pointers) {
-                        if (ptr.isKeyboard) {
-                            matchedPointer = ptr;
-                            break;
-                        }
-                        const relX = ptr.x - lineX;
-                        const relY = ptr.y - lineY;
-                        const projX = relX * cosA + relY * sinA;
-                        const projY = -relX * sinA + relY * cosA;
-
-                        if (Math.abs(projX - localX) <= hitRadius && Math.abs(projY) <= H * 0.45) {
-                            matchedPointer = ptr;
-                            break;
-                        }
-                    }
-
-                    if (note.type === 1) {
-                        if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
-                            matchedPointer.justPressed = false;
-                            note.judged = true;
-                            const res = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : (absDiff <= JUDGE_WINDOW.GOOD ? 'GOOD' : 'BAD');
-                            registerJudgement(res, note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                    } else if (note.type === 2) {
-                        if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                    } else if (note.type === 4) {
-                        if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
-                            matchedPointer.justPressed = false;
-                            note.judged = true;
-                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY);
-                            continue;
-                        }
-                    } else if (note.type === 3) {
-                        if (!note.isHolding) {
-                            if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
-                                matchedPointer.justPressed = false;
-                                note.isHolding = true;
-                                note.hitResult = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : 'GOOD';
-                                soundEngine.playHitSound(3);
-                                spawnHitEffect(worldNoteX, worldNoteY, note.hitResult === 'PERFECT' ? '#ffd700' : '#00f0ff');
-                            } else if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                            if (timeDiff < -JUDGE_WINDOW.GOOD) {
                                 note.judged = true;
                                 registerJudgement('MISS', note, worldNoteX, worldNoteY);
                                 continue;
                             }
-                        } else {
-                            if (chartTime >= note.endTime - 0.08) {
+                        } else if (note.type === 4) {
+                            // Flick
+                            if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
                                 note.judged = true;
-                                registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY);
+                                registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
                                 continue;
                             }
-                            if (matchedPointer) {
+                            if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                                note.judged = true;
+                                registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                continue;
+                            }
+                        } else if (note.type === 3) {
+                            // Hold
+                            if (!note.isHolding) {
+                                if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
+                                    matchedPointer.justPressed = false;
+                                    note.isHolding = true;
+                                    note.hitResult = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : 'GOOD';
+                                    soundEngine.playHitSound(3);
+                                    spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
+                                } else if (timeDiff < -JUDGE_WINDOW.GOOD) {
+                                    note.judged = true;
+                                    registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                    continue;
+                                }
+                            } else {
                                 note.holdTickTimer += dt;
-                                if (note.holdTickTimer >= 0.15) {
+                                if (note.holdTickTimer >= 0.14) {
                                     note.holdTickTimer = 0;
                                     spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
                                 }
-                            } else {
-                                note.judged = true;
-                                registerJudgement('MISS', note, worldNoteX, worldNoteY);
-                                continue;
+                                if (chartTime >= note.endTime - 0.06) {
+                                    note.judged = true;
+                                    registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY);
+                                    continue;
+                                }
+                                if (!matchedPointer) {
+                                    note.judged = true;
+                                    registerJudgement('MISS', note, worldNoteX, worldNoteY);
+                                    continue;
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            // ノーツ描画
-            const distStart = (note.floorPosition - currentFloorPos) * speedScaleY * note.speed;
-            if (note.type === 3) {
-                const headDist = note.isHolding ? 0 : Math.max(0, distStart);
-                const tailDist = (note.endFloorPosition - currentFloorPos) * speedScaleY * note.speed;
-                if (tailDist < -50 || headDist > H * 1.8) continue;
+                // ----------------------------------------------------------------
+                // ノーツ描画 (ホールド速度正規化 & 同時押しハイライト黄色発光)
+                // ----------------------------------------------------------------
+                const isHL = AppState.settings.multiHighlight && note.isHighlight;
+                const noteSpd = safeNum(note.speed, 1.0);
 
-                const yHead = dir * headDist;
-                const yTail = dir * tailDist;
-                const bodyTop = Math.min(yHead, yTail);
-                const bodyHeight = Math.abs(yTail - yHead);
+                // Phigros本家仕様:
+                // Holdノーツ(type === 3)の落下距離は判定ラインのfloorPosition基準（note.speedを落下速度に掛けない）
+                // Holdの帯の長さにはnote.speedを長さ倍率として適用する
+                const approachSpeedMult = (note.type === 3) ? 1.0 : noteSpd;
+                const distStart = (safeNum(note.floorPosition, 0) - currentFloorPos) * speedScaleY * approachSpeedMult;
 
-                ctx.globalAlpha = 0.85;
-                ctx.fillStyle = '#00d8ff';
-                ctx.fillRect(localX - noteWidthBase * 0.46, bodyTop, noteWidthBase * 0.92, bodyHeight);
+                if (note.type === 3) {
+                    const headDist = note.isHolding ? 0 : Math.max(0, distStart);
+                    let rawHoldLen = 0;
+                    if (note.isHoldLengthSpeed) {
+                        const remainingHoldSec = note.isHolding
+                            ? Math.max(0, safeNum(note.endTime, 0) - chartTime)
+                            : Math.max(0, safeNum(note.holdTime, 0));
+                        rawHoldLen = remainingHoldSec * speedScaleY * noteSpd;
+                    } else {
+                        const tailDistRaw = (safeNum(note.endFloorPosition, 0) - currentFloorPos) * speedScaleY;
+                        rawHoldLen = Math.max(0, tailDistRaw - headDist);
+                    }
 
-                ctx.globalAlpha = 1.0;
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(localX - noteWidthBase * 0.5, yHead - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
-            } else {
-                if (distStart < -40 || distStart > H * 1.8) continue;
-                const yPos = dir * distStart;
+                    const tailDist = headDist + rawHoldLen;
+                    if (!Number.isFinite(tailDist) || !Number.isFinite(headDist)) continue;
+                    if (tailDist < -50 || headDist > H * 1.8) continue;
 
-                ctx.globalAlpha = 1.0;
-                if (note.type === 1) {
-                    ctx.fillStyle = '#00f0ff';
-                    ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(localX - noteWidthBase * 0.45, yPos - noteHeightBase * 0.2, noteWidthBase * 0.9, noteHeightBase * 0.4);
-                } else if (note.type === 2) {
-                    ctx.fillStyle = '#ffd700';
-                    ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.45, noteWidthBase, noteHeightBase * 0.9);
-                } else if (note.type === 4) {
-                    ctx.fillStyle = '#ff2a6d';
-                    ctx.fillRect(localX - noteWidthBase * 0.52, yPos - noteHeightBase * 0.55, noteWidthBase * 1.04, noteHeightBase * 1.1);
-                    ctx.fillStyle = '#ffd1dc';
-                    ctx.fillRect(localX - noteWidthBase * 0.35, yPos - noteHeightBase * 0.2, noteWidthBase * 0.7, noteHeightBase * 0.4);
+                    const yHead = dir * headDist;
+                    const yTail = dir * tailDist;
+                    const bodyTop = Math.min(yHead, yTail);
+                    const bodyHeight = Math.abs(yTail - yHead);
+
+                    ctx.save();
+                    // ホールド本体（帯）
+                    ctx.globalAlpha = 0.85;
+                    const halfW = noteWidthBase * 0.46;
+                    if (isHL && Number.isFinite(localX) && Number.isFinite(halfW) && halfW > 0) {
+                        const bodyGrad = ctx.createLinearGradient(localX - halfW, 0, localX + halfW, 0);
+                        bodyGrad.addColorStop(0, 'rgba(255, 215, 0, 0.85)');
+                        bodyGrad.addColorStop(0.25, 'rgba(0, 225, 255, 0.82)');
+                        bodyGrad.addColorStop(0.75, 'rgba(0, 225, 255, 0.82)');
+                        bodyGrad.addColorStop(1, 'rgba(255, 215, 0, 0.85)');
+                        ctx.fillStyle = bodyGrad;
+                        ctx.fillRect(localX - halfW, bodyTop, halfW * 2, bodyHeight);
+
+                        // 同時押しホールドの両端ゴールドライン
+                        ctx.strokeStyle = '#ffd700';
+                        ctx.lineWidth = 2.5;
+                        ctx.strokeRect(localX - halfW, bodyTop, halfW * 2, bodyHeight);
+                    } else {
+                        ctx.fillStyle = '#00d8ff';
+                        ctx.fillRect(localX - halfW, bodyTop, halfW * 2, bodyHeight);
+                    }
+
+                    // ホールド先頭キャップ（ヘッド）
+                    ctx.globalAlpha = 1.0;
+                    if (isHL) {
+                        ctx.shadowColor = '#ffd700';
+                        ctx.shadowBlur = 16;
+                        ctx.fillStyle = '#ffd700';
+                        ctx.fillRect(localX - noteWidthBase * 0.54, yHead - noteHeightBase * 0.65, noteWidthBase * 1.08, noteHeightBase * 1.3);
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(localX - noteWidthBase * 0.48, yHead - noteHeightBase * 0.42, noteWidthBase * 0.96, noteHeightBase * 0.84);
+                    } else {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(localX - noteWidthBase * 0.5, yHead - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+                    }
+                    ctx.restore();
+                } else {
+                    if (!Number.isFinite(distStart) || distStart < -40 || distStart > H * 1.8) continue;
+                    const yPos = dir * distStart;
+
+                    ctx.save();
+                    ctx.globalAlpha = 1.0;
+
+                    // 同時押しノーツ（isHighlight）の本家風・黄色/金色外周オーラ＆フレーム
+                    if (isHL) {
+                        ctx.shadowColor = '#ffd700';
+                        ctx.shadowBlur = 18;
+                        ctx.fillStyle = '#ffd700';
+                        const padW = noteWidthBase * 0.08;
+                        const padH = noteHeightBase * 0.32;
+                        ctx.fillRect(
+                            localX - noteWidthBase * 0.5 - padW,
+                            yPos - noteHeightBase * 0.5 - padH,
+                            noteWidthBase + padW * 2,
+                            noteHeightBase + padH * 2
+                        );
+                        ctx.shadowBlur = 0;
+                    }
+
+                    if (note.type === 1) {
+                        // Tap (水色 + 同時押し時は黄色外枠＆金色グロウ)
+                        ctx.fillStyle = '#00f0ff';
+                        ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+                        ctx.fillStyle = isHL ? '#fffbeb' : '#ffffff';
+                        ctx.fillRect(localX - noteWidthBase * 0.44, yPos - noteHeightBase * 0.18, noteWidthBase * 0.88, noteHeightBase * 0.36);
+                    } else if (note.type === 2) {
+                        // Drag (黄色 + 同時押し時は白金インナー発光)
+                        ctx.fillStyle = '#ffd700';
+                        ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.45, noteWidthBase, noteHeightBase * 0.9);
+                        if (isHL) {
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(localX - noteWidthBase * 0.42, yPos - noteHeightBase * 0.2, noteWidthBase * 0.84, noteHeightBase * 0.4);
+                        }
+                    } else if (note.type === 4) {
+                        // Flick (赤/ピンク + 同時押し時は金色外枠＆グロウ)
+                        ctx.fillStyle = '#ff2a6d';
+                        ctx.fillRect(localX - noteWidthBase * 0.5, yPos - noteHeightBase * 0.52, noteWidthBase, noteHeightBase * 1.04);
+                        ctx.fillStyle = isHL ? '#ffe57f' : '#ffd1dc';
+                        ctx.fillRect(localX - noteWidthBase * 0.36, yPos - noteHeightBase * 0.2, noteWidthBase * 0.72, noteHeightBase * 0.4);
+                    }
+                    ctx.restore();
                 }
             }
+
+            ctx.restore();
+        });
+
+        for (const [, ptr] of AppState.pointers) {
+            ptr.justPressed = false;
+            ptr.speed *= 0.6;
         }
 
-        ctx.restore();
-    });
-
-    for (const [, ptr] of AppState.pointers) {
-        ptr.justPressed = false;
-        ptr.speed *= 0.6;
+        drawEffects(dt, W, H);
+        drawTouchFeedback(W, H);
+        drawGameHUD(W, H, rawTime);
+    } catch (err) {
+        console.error("描画ループエラー:", err);
     }
-
-    drawEffects(dt, W, H);
-    drawTouchFeedback(W, H);
-    drawGameHUD(W, H, rawTime);
 }
 
 function drawBackground(W, H) {
     if (AppState.bgImage) {
         const img = AppState.bgImage;
-        const imgRatio = img.width / img.height;
+        const imgRatio = Math.max(0.01, img.width / Math.max(1, img.height));
         const canvasRatio = W / H;
         let dw = W, dh = H, dx = 0, dy = 0;
 
@@ -2118,7 +2346,7 @@ function drawBackground(W, H) {
         ctx.restore();
     }
 
-    const dimAlpha = 1.0 - AppState.settings.bgBrightness;
+    const dimAlpha = 1.0 - safeNum(AppState.settings.bgBrightness, 0.4);
     ctx.fillStyle = `rgba(4, 8, 18, ${dimAlpha})`;
     ctx.fillRect(0, 0, W, H);
 }
@@ -2248,8 +2476,9 @@ function resetChartState() {
     AppState.judgePopups = [];
     AppState.pointers.clear();
 
-    if (AppState.chart) {
+    if (AppState.chart && Array.isArray(AppState.chart.judgeLines)) {
         AppState.chart.judgeLines.forEach(line => {
+            if (!Array.isArray(line.notes)) return;
             line.notes.forEach(n => {
                 n.judged = false;
                 n.isHolding = false;
@@ -2459,6 +2688,10 @@ window.onload = () => {
 
     document.getElementById('hitSoundToggle').addEventListener('change', (e) => {
         AppState.settings.hitSound = e.target.checked;
+    });
+
+    document.getElementById('highlightToggle').addEventListener('change', (e) => {
+        AppState.settings.multiHighlight = e.target.checked;
     });
 
     // ゲーム操作ボタン
