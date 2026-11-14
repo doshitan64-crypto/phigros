@@ -40,7 +40,6 @@
             touch-action: none;
         }
 
-        /* iOS Safari等Fullscreen API未対応環境向けの疑似全画面スタイル */
         body.pseudo-fullscreen {
             position: fixed !important;
             inset: 0 !important;
@@ -53,12 +52,10 @@
             font-family: 'Rajdhani', 'Noto Sans JP', sans-serif;
         }
 
-        /* 幾何学カットアウト */
         .phi-cut {
             clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
         }
 
-        /* 背景グリッドアニメーション */
         .bg-grid {
             background-size: 40px 40px;
             background-image: 
@@ -66,7 +63,6 @@
                 linear-gradient(to bottom, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
         }
 
-        /* カスタムレンジスライダー */
         input[type="range"] {
             -webkit-appearance: none;
             appearance: none;
@@ -90,7 +86,6 @@
             transform: scale(1.25);
         }
 
-        /* ドロップオーバーレイのパルスアニメーション */
         @keyframes borderPulse {
             0%, 100% { border-color: rgba(0, 240, 255, 0.85); box-shadow: inset 0 0 40px rgba(0, 240, 255, 0.25); }
             50% { border-color: rgba(255, 215, 0, 0.95); box-shadow: inset 0 0 60px rgba(255, 215, 0, 0.3); }
@@ -99,7 +94,6 @@
             animation: borderPulse 1.5s infinite ease-in-out;
         }
 
-        /* カスタムスクロールバー */
         .custom-scroll::-webkit-scrollbar {
             width: 6px;
         }
@@ -114,7 +108,7 @@
 </head>
 <body class="bg-grid relative flex items-center justify-center">
 
-    <!-- 画面全体ドラッグ＆ドロップ オーバーレイ (iPad Split View / Android / PCドラッグ対応) -->
+    <!-- 画面全体ドラッグ＆ドロップ オーバーレイ -->
     <div id="dropOverlay" class="fixed inset-0 z-50 hidden bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-6 pointer-events-none transition-opacity duration-200">
         <div class="drop-active-box w-full h-full border-4 border-dashed border-cyan-400 rounded-3xl flex flex-col items-center justify-center text-center p-8">
             <div class="w-24 h-24 mb-6 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-cyan-300 shadow-[0_0_30px_rgba(0,240,255,0.4)]">
@@ -130,17 +124,14 @@
         </div>
     </div>
 
-    <!-- トースト通知エリア (alert()の代替) -->
+    <!-- トースト通知エリア -->
     <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full px-4 sm:px-0"></div>
 
-    <!-- メインゲームコンテナ (16:9 レスポンシブ維持) -->
+    <!-- メインゲームコンテナ -->
     <div id="appWrapper" class="relative w-full h-full flex items-center justify-center overflow-hidden">
-        <!-- 16:9 Canvas -->
         <canvas id="gameCanvas" class="block shadow-2xl bg-slate-950"></canvas>
 
-        <!-- ゲームプレイ中の上部HUDオーバーレイ -->
         <div id="hudOverlay" class="hidden absolute top-0 left-0 right-0 p-3 sm:p-5 flex justify-between items-start pointer-events-none z-20">
-            <!-- 左上: 一時停止 & 全画面ボタン -->
             <div class="flex items-center gap-2 pointer-events-auto">
                 <button id="pauseBtn" class="p-3 rounded-xl bg-slate-900/75 hover:bg-cyan-950/90 border border-white/20 hover:border-cyan-400 text-white backdrop-blur-sm transition active:scale-95 flex items-center gap-2 shadow-lg" title="一時停止 (Esc)">
                     <svg class="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
@@ -150,26 +141,22 @@
                 </button>
                 <button class="fullscreenToggleBtn p-3 rounded-xl bg-slate-900/75 hover:bg-cyan-950/90 border border-white/20 hover:border-cyan-400 text-white backdrop-blur-sm transition active:scale-95 flex items-center gap-1.5 shadow-lg" title="全画面表示切替">
                     <svg class="w-5 h-5 text-cyan-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l-5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
                     </svg>
                     <span class="fsBtnLabel hidden md:inline text-xs font-bold tracking-wider">全画面</span>
                 </button>
             </div>
 
-            <!-- 右上: オートプレイ表示バッジ（有効時） -->
             <div id="autoBadge" class="hidden px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/70 text-amber-300 text-xs sm:text-sm font-bold tracking-widest backdrop-blur-sm shadow-[0_0_15px_rgba(255,215,0,0.3)]">
                 AUTO PLAY 稼働中
             </div>
         </div>
     </div>
 
-    <!-- =========================================================
-         1. メインメニュー（ファイル読み込み・設定画面）
-    ========================================================= -->
+    <!-- メインメニュー -->
     <div id="mainMenu" class="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md">
         <div class="w-full max-w-5xl bg-slate-900/95 border border-cyan-500/30 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.85)] overflow-hidden flex flex-col max-h-[95vh]">
             
-            <!-- ヘッダーバー -->
             <div class="px-5 py-4 sm:px-7 sm:py-5 bg-gradient-to-r from-slate-950 via-slate-900 to-cyan-950/40 border-b border-white/10 flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
                     <div class="w-3 h-8 bg-cyan-400 rounded-sm shadow-[0_0_12px_#00f0ff]"></div>
@@ -178,18 +165,16 @@
                             PHIGROS SIMULATOR
                             <span class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-bold">日本語版</span>
                         </h1>
-                        <p class="text-xs text-slate-400">画面ドロップ・マルチタッチ・Arcaea式音ズレ調整対応 譜面模擬器</p>
+                        <p class="text-xs text-slate-400">判定幅超拡大・マルチタッチ・Arcaea式音ズレ調整対応</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- 全画面ボタン -->
                     <button class="fullscreenToggleBtn px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-cyan-950 border border-cyan-500/40 text-xs sm:text-sm font-bold text-cyan-300 flex items-center gap-1.5 transition active:scale-95">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l-5-5m11 5l-5-5m5 5v-4m0 4h-4"></path>
                         </svg>
                         <span class="fsBtnLabel">全画面</span>
                     </button>
-                    <!-- 操作ガイド -->
                     <button id="openGuideBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-xs sm:text-sm font-bold text-slate-200 flex items-center gap-1.5 transition active:scale-95">
                         <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         操作ガイド
@@ -197,15 +182,11 @@
                 </div>
             </div>
 
-            <!-- コンテンツボディ (2カラムレスポンシブ) -->
             <div class="p-5 sm:p-7 overflow-y-auto custom-scroll grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                <!-- 左カラム: ファイル読み込み・楽曲情報 (7カラム) -->
                 <div class="lg:col-span-7 flex flex-col gap-4">
-                    
-                    <!-- タブレット＆PC対応 ドロップゾーンカード -->
                     <div id="menuDropZone" class="relative group rounded-2xl border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/60 p-5 text-center transition-all cursor-pointer">
-                        <input type="file" id="fileInput" multiple accept=".json,.pec,.mp3,.ogg,.wav,.m4a,.png,.jpg,.jpeg,.webp,.zip,.txt,.csv" class="hidden">
+                        <input type="file" id="fileInput" multiple accept=".json,.pec,.mp3,.ogg,.wav,.m4a,.aac,.flac,.png,.jpg,.jpeg,.webp,.zip,.txt,.csv" class="hidden">
                         <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
                         
                         <div class="flex flex-col items-center justify-center">
@@ -236,14 +217,12 @@
                         </div>
                     </div>
 
-                    <!-- 読み込み済みアセット状況ステータス -->
                     <div class="bg-slate-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-3">
                         <div class="flex items-center justify-between border-b border-white/10 pb-2">
                             <span class="text-xs font-bold text-slate-400 tracking-wider">読み込みステータス</span>
                             <span id="readyStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-400/40 font-bold">譜面と音源を読み込んでください</span>
                         </div>
 
-                        <!-- 楽曲タイトル＆難易度編集 -->
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                             <div class="sm:col-span-2">
                                 <label class="block text-[11px] text-slate-400 mb-1">楽曲タイトル</label>
@@ -255,9 +234,7 @@
                             </div>
                         </div>
 
-                        <!-- 3つのファイルスロット表示 -->
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                            <!-- 譜面 -->
                             <div id="chartSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors">
                                 <div class="flex items-center justify-between mb-1">
                                     <span class="text-xs font-bold text-cyan-400">譜面データ <span class="text-rose-400">*必須</span></span>
@@ -266,7 +243,6 @@
                                 <p id="chartFileName" class="text-xs text-slate-400 truncate font-medium">未読み込み (.json / .pec)</p>
                                 <p id="noteCountText" class="text-[11px] text-slate-500 mt-0.5">総ノーツ数: -</p>
                             </div>
-                            <!-- 音源 -->
                             <div id="audioSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-rose-500/30 flex flex-col justify-between transition-colors">
                                 <div class="flex items-center justify-between mb-1">
                                     <span class="text-xs font-bold text-amber-400">楽曲音源 <span class="text-rose-400">*必須</span></span>
@@ -275,7 +251,6 @@
                                 <p id="audioFileName" class="text-xs text-slate-400 truncate font-medium">未読み込み (.mp3 / .ogg / .wav)</p>
                                 <p id="audioDurationText" class="text-[11px] text-slate-500 mt-0.5">再生時間: --:--</p>
                             </div>
-                            <!-- 背景イラスト -->
                             <div id="bgSlotCard" class="p-2.5 rounded-xl bg-slate-900/90 border border-white/10 flex flex-col justify-between transition-colors">
                                 <div class="flex items-center justify-between mb-1">
                                     <span class="text-xs font-bold text-pink-400">背景イラスト <span class="text-slate-500">(任意)</span></span>
@@ -288,12 +263,10 @@
                     </div>
                 </div>
 
-                <!-- 右カラム: プレイ設定・音ズレ調整・スタートボタン (5カラム) -->
                 <div class="lg:col-span-5 flex flex-col justify-between gap-4">
                     <div class="bg-slate-950/70 border border-white/10 rounded-2xl p-4 flex flex-col gap-3.5">
                         <h3 class="text-xs font-bold text-cyan-300 tracking-wider border-b border-white/10 pb-2">譜面・判定設定</h3>
 
-                        <!-- Arcaea風 音ズレ調整ボタン＆現在値表示 -->
                         <div class="p-3 rounded-xl bg-slate-900/90 border border-cyan-500/30 flex items-center justify-between gap-2">
                             <div>
                                 <span class="text-xs font-bold text-slate-200 block">音ズレ調整 (オフセット)</span>
@@ -305,7 +278,6 @@
                             </button>
                         </div>
 
-                        <!-- ノーツサイズ倍率 -->
                         <div>
                             <div class="flex justify-between text-xs mb-1">
                                 <span class="text-slate-300 font-medium">ノーツサイズ倍率</span>
@@ -314,7 +286,6 @@
                             <input type="range" id="noteScaleSlider" min="0.6" max="1.5" step="0.05" value="1.0" class="w-full">
                         </div>
 
-                        <!-- 背景の明るさ -->
                         <div>
                             <div class="flex justify-between text-xs mb-1">
                                 <span class="text-slate-300 font-medium">背景の明るさ</span>
@@ -323,7 +294,6 @@
                             <input type="range" id="bgDimSlider" min="10" max="90" step="5" value="40" class="w-full">
                         </div>
 
-                        <!-- 再生速度 -->
                         <div>
                             <div class="flex justify-between text-xs mb-1">
                                 <span class="text-slate-300 font-medium">再生速度 (練習用)</span>
@@ -332,7 +302,6 @@
                             <input type="range" id="speedSlider" min="0.5" max="1.5" step="0.05" value="1.0" class="w-full">
                         </div>
 
-                        <!-- 同時押しハイライト＆オートプレイ＆ヒット音トグル -->
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                             <label class="sm:col-span-2 flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-amber-400/30 cursor-pointer hover:border-amber-400/70 transition">
                                 <div>
@@ -352,7 +321,6 @@
                         </div>
                     </div>
 
-                    <!-- プレイ開始ボタン (譜面と音源の両方が読み込まれるまで無効化) -->
                     <button id="startGameBtn" disabled class="phi-cut w-full py-4 px-6 bg-slate-800 text-slate-500 cursor-not-allowed font-black text-lg sm:text-xl tracking-widest transition transform flex items-center justify-center gap-3">
                         <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                         <span id="startBtnText">譜面と音源を読み込んでください</span>
@@ -363,12 +331,9 @@
         </div>
     </div>
 
-    <!-- =========================================================
-         2. Arcaea風 音ズレ調整（オーディオオフセットキャリブレーション）モーダル
-    ========================================================= -->
+    <!-- 音ズレ調整モーダル -->
     <div id="calibrationModal" class="hidden fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-lg flex items-center justify-center p-3 sm:p-6">
         <div class="w-full max-w-xl bg-slate-900 border border-cyan-400/50 rounded-2xl shadow-[0_0_50px_rgba(0,240,255,0.25)] overflow-hidden flex flex-col">
-            <!-- ヘッダー -->
             <div class="px-6 py-4 bg-slate-950 border-b border-white/10 flex items-center justify-between">
                 <div>
                     <h2 class="text-lg sm:text-xl font-black text-white tracking-wider flex items-center gap-2">
@@ -382,10 +347,7 @@
                 </button>
             </div>
 
-            <!-- メイン計測エリア -->
             <div class="p-5 sm:p-6 flex flex-col items-center gap-5">
-                
-                <!-- 4拍子ビートインジケーター -->
                 <div class="flex items-center justify-center gap-4">
                     <div id="calBeat0" class="w-5 h-5 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
                     <div id="calBeat1" class="w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
@@ -393,7 +355,6 @@
                     <div id="calBeat3" class="w-4 h-4 rounded-full bg-slate-800 border border-white/20 transition-all duration-75"></div>
                 </div>
 
-                <!-- Arcaea風 EARLY / LATE タイミングメーター -->
                 <div class="w-full bg-slate-950/90 border border-white/10 rounded-2xl p-4">
                     <div class="flex justify-between items-end mb-2">
                         <span class="text-xs font-black tracking-widest text-cyan-400">EARLY (早い)</span>
@@ -404,18 +365,11 @@
                         <span class="text-xs font-black tracking-widest text-amber-400">LATE (遅い)</span>
                     </div>
 
-                    <!-- タイミングバー (-150ms ~ +150ms) -->
                     <div class="relative w-full h-10 bg-slate-900 rounded-xl border border-white/10 overflow-hidden flex items-center">
-                        <!-- 目盛り線 -->
                         <div class="absolute inset-y-0 left-1/4 w-px bg-white/10"></div>
                         <div class="absolute inset-y-0 left-3/4 w-px bg-white/10"></div>
-                        <!-- 中央 0ms 基準線 -->
                         <div class="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 bg-emerald-400 shadow-[0_0_10px_#34d399] z-10"></div>
-                        
-                        <!-- タップ履歴マーカー描画コンテナ -->
                         <div id="calMarkersContainer" class="absolute inset-0 pointer-events-none"></div>
-
-                        <!-- 平均値インジケーター -->
                         <div id="calAvgMarker" class="absolute top-1 bottom-1 w-2 -ml-1 rounded-full bg-white shadow-[0_0_12px_#ffffff] transition-all duration-150 z-20" style="left: 50%;"></div>
                     </div>
                     <div class="flex justify-between text-[10px] font-cyber text-slate-500 mt-1 px-1">
@@ -427,13 +381,11 @@
                     </div>
                 </div>
 
-                <!-- 大型タップパッド (Arcaea風のサイバーパッド) -->
                 <button type="button" id="calTapPad" class="w-full py-7 sm:py-8 rounded-2xl bg-gradient-to-b from-cyan-950/70 to-slate-950 hover:from-cyan-900/70 active:scale-[0.98] border-2 border-cyan-400/70 shadow-[0_0_25px_rgba(0,240,255,0.2)] flex flex-col items-center justify-center transition-transform cursor-pointer">
                     <span class="text-lg sm:text-xl font-black text-white tracking-widest mb-1">リズムに合わせてタップ</span>
                     <span id="calLastDeltaText" class="font-cyber text-xs font-bold text-cyan-300">タップして計測開始</span>
                 </button>
 
-                <!-- 手動微調整ボタン (-10 / -1 / リセット / +1 / +10) -->
                 <div class="w-full flex flex-wrap items-center justify-center gap-2">
                     <button type="button" data-delta="-10" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-cyan-300 active:scale-95">-10ms</button>
                     <button type="button" data-delta="-1" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-cyan-300 active:scale-95">-1ms</button>
@@ -442,7 +394,6 @@
                     <button type="button" data-delta="10" class="calFineBtn px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 font-cyber font-bold text-xs sm:text-sm text-amber-300 active:scale-95">+10ms</button>
                 </div>
 
-                <!-- 適用＆キャンセルボタン -->
                 <div class="w-full grid grid-cols-2 gap-3 pt-1">
                     <button type="button" id="calCancelBtn" class="py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 font-bold text-sm transition active:scale-95">
                         キャンセル
@@ -455,9 +406,7 @@
         </div>
     </div>
 
-    <!-- =========================================================
-         3. 一時停止モーダル
-    ========================================================= -->
+    <!-- 一時停止モーダル -->
     <div id="pauseModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
         <div class="w-full max-w-md bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 text-center shadow-2xl">
             <h2 class="text-2xl font-black text-white tracking-wider mb-1">一時停止</h2>
@@ -473,19 +422,16 @@
                 <button class="fullscreenToggleBtn w-full py-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-cyan-500/30 text-cyan-300 font-bold text-sm tracking-wider transition active:scale-95">
                     <span class="fsBtnLabel">全画面表示切替</span>
                 </button>
-                <button id="backToMenuBtn" class="w-full py-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-200 font-bold text-base tracking-wider transition active:scale-95">
+                <button id="pauseBackToMenuBtn" class="w-full py-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-200 font-bold text-base tracking-wider transition active:scale-95">
                     選曲・読み込み画面へ戻る
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- =========================================================
-         4. リザルト画面（結果発表）
-    ========================================================= -->
+    <!-- リザルト画面 -->
     <div id="resultModal" class="hidden fixed inset-0 z-40 bg-slate-950/85 backdrop-blur-lg flex items-center justify-center p-4">
         <div class="w-full max-w-2xl bg-slate-900/95 border border-cyan-400/40 rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(0,240,255,0.2)]">
-            <!-- 上部バナー -->
             <div class="px-6 py-4 bg-gradient-to-r from-slate-950 via-cyan-950/40 to-slate-950 border-b border-white/10 flex items-center justify-between">
                 <div>
                     <span id="resultDiffBadge" class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-bold">IN Lv.15</span>
@@ -496,7 +442,6 @@
                 </div>
             </div>
 
-            <!-- スコア・ランク表示 -->
             <div class="p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-around gap-6 border-b border-white/10">
                 <div class="relative w-32 h-32 rounded-2xl bg-slate-950 border-2 border-cyan-400/50 flex flex-col items-center justify-center shadow-[0_0_30px_rgba(0,240,255,0.25)]">
                     <span class="text-[10px] text-slate-400 tracking-widest uppercase">RANK</span>
@@ -519,7 +464,6 @@
                 </div>
             </div>
 
-            <!-- 判定内訳 -->
             <div class="px-6 py-4 bg-slate-950/60 grid grid-cols-4 gap-2 text-center">
                 <div class="p-2 rounded-xl bg-slate-900/80 border border-amber-400/20">
                     <span class="block text-xs font-bold text-amber-300">PERFECT</span>
@@ -539,7 +483,6 @@
                 </div>
             </div>
 
-            <!-- ボタン -->
             <div class="p-5 flex flex-col sm:flex-row gap-3">
                 <button id="resultRetryBtn" class="flex-1 py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-base tracking-wider transition active:scale-95">
                     もう一度プレイ
@@ -551,9 +494,7 @@
         </div>
     </div>
 
-    <!-- =========================================================
-         5. 操作ガイド・対応ファイル形式モーダル
-    ========================================================= -->
+    <!-- 操作ガイドモーダル -->
     <div id="guideModal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
         <div class="w-full max-w-2xl bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[88vh]">
             <div class="px-6 py-4 bg-slate-950 border-b border-white/10 flex items-center justify-between">
@@ -564,41 +505,17 @@
             </div>
             <div class="p-6 overflow-y-auto custom-scroll space-y-5 text-sm text-slate-300 leading-relaxed">
                 <div>
-                    <h3 class="text-cyan-400 font-bold text-base mb-1.5">1. タブレット・PCでのファイル読み込み方法</h3>
-                    <ul class="list-disc list-inside space-y-1 text-slate-300">
-                        <li><strong class="text-white">画面全体ドロップ：</strong>iPadの「ファイル」アプリ等をSplit View（画面分割）やSlide Overで横に開き、譜面・音源・画像・ZIPファイルをこのブラウザ画面へ直接ドラッグ＆ドロップできます。</li>
-                        <li><strong class="text-white">一括読み込み (.zip)：</strong>譜面JSON/PEC、音源MP3/OGG、背景画像、info.txt/csvが入ったZIPファイルをそのままドロップすると自動で解析・セットします。</li>
-                        <li><strong class="text-white">プレイ開始条件：</strong>「譜面データ」と「楽曲音源」の両方が読み込まれるとプレイ開始ボタンが有効になります。</li>
-                    </ul>
-                </div>
-
-                <div>
-                    <h3 class="text-amber-400 font-bold text-base mb-1.5">2. Arcaea式 音ズレ調整の使い方</h3>
+                    <h3 class="text-cyan-400 font-bold text-base mb-1.5">1. 判定幅の超大幅拡大</h3>
                     <p>
-                        「音ズレ調整を開く」を押すと4拍子のメトロノーム音が鳴ります。音にぴったり合わせて中央のパッドをタップすると、自分のタップが音に対してどれだけ早いか（EARLY / マイナス）・遅いか（LATE / プラス）がリアルタイムで計測され、平均値が自動算出されます。
+                        判定ラインの上下方向（localY）および横方向の許容範囲を極限まで広げ、ノーツ付近を大雑把にタップするだけで確実に反応するように調整しています。
                     </p>
                 </div>
-
                 <div>
-                    <h3 class="text-emerald-400 font-bold text-base mb-1.5">3. ノーツの種類と操作方法</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div class="p-3 rounded-xl bg-slate-950/80 border border-cyan-500/30">
-                            <span class="font-bold text-cyan-300 block mb-0.5">Tap（水色ノーツ）</span>
-                            判定ラインに重なる瞬間に画面をタップ。
-                        </div>
-                        <div class="p-3 rounded-xl bg-slate-950/80 border border-amber-500/30">
-                            <span class="font-bold text-amber-300 block mb-0.5">Drag（黄色ノーツ）</span>
-                            判定ライン付近に指を置いておくだけで自動判定。
-                        </div>
-                        <div class="p-3 rounded-xl bg-slate-950/80 border border-blue-500/30">
-                            <span class="font-bold text-blue-300 block mb-0.5">Hold（長押しノーツ）</span>
-                            頭をタップし、帯が終わるまで指を押し続けます（指持ち替え・早離し対応）。
-                        </div>
-                        <div class="p-3 rounded-xl bg-slate-950/80 border border-pink-500/30">
-                            <span class="font-bold text-pink-400 block mb-0.5">Flick（赤/ピンクノーツ）</span>
-                            判定ラインに重なるタイミングで指を素早くスライドします。
-                        </div>
-                    </div>
+                    <h3 class="text-amber-400 font-bold text-base mb-1.5">2. タブレット・PCでのファイル読み込み方法</h3>
+                    <ul class="list-disc list-inside space-y-1 text-slate-300">
+                        <li><strong class="text-white">画面全体ドロップ：</strong>iPadの「ファイル」アプリ等をSplit Viewで横に開き、譜面・音源・画像・ZIPファイルをこのブラウザ画面へ直接ドラッグ＆ドロップできます。</li>
+                        <li><strong class="text-white">一括読み込み (.zip)：</strong>譜面JSON/PEC、音源MP3/OGGが入ったZIPファイルをそのままドロップすると自動で解析・セットします。</li>
+                    </ul>
                 </div>
             </div>
             <div class="px-6 py-3.5 bg-slate-950 border-t border-white/10 text-right">
@@ -608,61 +525,34 @@
     </div>
 
 <script>
-/**
- * ============================================================================
- * Phigros風リズムゲームシミュレーター (日本語版) コアエンジン
- * ----------------------------------------------------------------------------
- * - デモモードなし（ユーザー譜面 .json/.pec + 音源 .mp3/.ogg/.wav/.m4a 読み込み専用）
- * - 画面全体ドラッグ＆ドロップ + JSZip解凍 + info.txt/info.csvメタデータ自動読込
- * - 全画面表示切替 (Fullscreen API + iOS Safari疑似全画面フォールバック)
- * - Arcaea式インタラクティブ音ズレ調整 (AudioContext高精度メトロノーム計測)
- * - ホールド落下速度正規化 & 快適な長押し判定（持ち替え・猶予・早離し保証）
- * - 同時押しノーツの本家風金色フレーム強調
- * ============================================================================
- */
-
-// 数値安全性チェック用ヘルパー (NaN / Infinity による描画クラッシュ防止)
 function safeNum(val, fallback = 0) {
     const n = Number(val);
     return Number.isFinite(n) ? n : fallback;
 }
 
-// ----------------------------------------------------------------------------
-// 1. グローバル状態管理 & 設定
-// ----------------------------------------------------------------------------
 const AppState = {
     isPlaying: false,
     isPaused: false,
     pseudoFullscreen: false,
-    
-    // 楽曲メタデータ
     title: "",
     difficulty: "IN Lv.15",
-    
-    // パース済み譜面データ
     chart: null,
     chartFileName: "",
     totalNotes: 0,
-    
-    // 音源・背景リソース
     audioBuffer: null,
     audioFileName: "",
     audioDuration: 0,
     bgImage: null,
     bgFileName: "",
-    
-    // ユーザー設定
     settings: {
-        offsetMs: 0,         // 判定オフセット (ms)
-        noteScale: 1.0,      // ノーツ幅倍率
-        bgBrightness: 0.4,   // 背景明るさ (0.1 - 0.9)
-        playbackRate: 1.0,   // 再生速度 (0.5 - 1.5)
-        autoPlay: false,     // オートプレイ
-        hitSound: true,      // ヒット音有効
-        multiHighlight: true // 同時押しノーツの黄色発光ハイライト
+        offsetMs: 0,
+        noteScale: 1.0,
+        bgBrightness: 0.4,
+        playbackRate: 1.0,
+        autoPlay: false,
+        hitSound: true,
+        multiHighlight: true
     },
-
-    // プレイ中の統計・判定データ
     stats: {
         perfect: 0,
         good: 0,
@@ -672,16 +562,11 @@ const AppState = {
         maxCombo: 0,
         score: 0
     },
-
     effects: [],
     judgePopups: [],
-    pointers: new Map(),
-    activeKeys: new Set()
+    pointers: new Map()
 };
 
-// ----------------------------------------------------------------------------
-// 2. Web Audio API サウンドエンジン（低遅延ヒット音＆楽曲再生）
-// ----------------------------------------------------------------------------
 class SoundEngine {
     constructor() {
         this.ctx = null;
@@ -710,7 +595,6 @@ class SoundEngine {
         return await this.ctx.decodeAudioData(arrayBuffer);
     }
 
-    // 低遅延シンセヒット音（外部音声ファイル不要）
     playHitSound(type = 1) {
         if (!AppState.settings.hitSound) return;
         this.init();
@@ -745,9 +629,7 @@ class SoundEngine {
             gain.connect(this.ctx.destination);
             osc.start(now);
             osc.stop(now + 0.065);
-        } catch (e) {
-            // 音声再生ブロック時は無視
-        }
+        } catch (e) {}
     }
 
     async startMusic(offsetSec = 0) {
@@ -797,22 +679,18 @@ class SoundEngine {
 
 const soundEngine = new SoundEngine();
 
-// ----------------------------------------------------------------------------
-// 3. Arcaea風 音ズレ調整（オーディオオフセットキャリブレーション）エンジン
-// ----------------------------------------------------------------------------
 class OffsetCalibrator {
     constructor() {
         this.isActive = false;
         this.bpm = 120;
-        this.beatInterval = 60 / this.bpm; // 0.5秒 (500ms)
+        this.beatInterval = 60 / this.bpm;
         this.startAudioTime = 0;
         this.nextScheduleTime = 0;
         this.beatIndex = 0;
         this.timerId = null;
         this.rafId = null;
-
-        this.samples = [];     // 計測されたデルタ配列 (ms)
-        this.tempOffsetMs = 0; // 現在表示中のオフセット値 (ms)
+        this.samples = [];
+        this.tempOffsetMs = 0;
     }
 
     open() {
@@ -828,7 +706,6 @@ class OffsetCalibrator {
         document.getElementById('calLastDeltaText').textContent = 'タップして計測開始';
         document.getElementById('calibrationModal').classList.remove('hidden');
 
-        // メトロノーム開始
         const now = soundEngine.ctx.currentTime;
         this.startAudioTime = now + 0.15;
         this.nextScheduleTime = this.startAudioTime;
@@ -916,7 +793,6 @@ class OffsetCalibrator {
         const elapsed = tapTime - this.startAudioTime;
         if (elapsed < -0.25) return;
 
-        // 最も近いビート時刻との差分を計算 (正 = 遅い/LATE, 負 = 早い/EARLY)
         const nearestBeatNum = Math.round(elapsed / this.beatInterval);
         const nearestBeatTime = this.startAudioTime + nearestBeatNum * this.beatInterval;
         const deltaMs = (tapTime - nearestBeatTime) * 1000;
@@ -991,11 +867,7 @@ class OffsetCalibrator {
 
 const calibrator = new OffsetCalibrator();
 
-// ----------------------------------------------------------------------------
-// 4. 譜面パーサー（Phigros公式JSON形式 & PEC形式）
-// ----------------------------------------------------------------------------
 class ChartParser {
-    // 全判定ラインを横断して同タイミング（±2ms以内）の同時押しノーツを検出しフラグを付与
     static markSimultaneousNotes(judgeLines) {
         if (!Array.isArray(judgeLines)) return;
         const allNotes = [];
@@ -1351,12 +1223,8 @@ class ChartParser {
     }
 }
 
-// ----------------------------------------------------------------------------
-// 5. ファイル読み込み＆画面全体ドラッグ＆ドロップ処理 (タブレットSplit View対応)
-// ----------------------------------------------------------------------------
 async function handleDroppedOrSelectedFiles(fileList) {
     if (!fileList || fileList.length === 0) return;
-
     const extractedFiles = [];
 
     for (const file of Array.from(fileList)) {
@@ -1388,7 +1256,6 @@ async function handleDroppedOrSelectedFiles(fileList) {
         const name = file.name;
         const lower = name.toLowerCase();
 
-        // info.txt / info.csv の自動解析
         if (lower === 'info.txt' || lower === 'info.csv') {
             try {
                 const txt = await file.text();
@@ -1397,7 +1264,6 @@ async function handleDroppedOrSelectedFiles(fileList) {
             continue;
         }
 
-        // 譜面ファイル (.json / .pec)
         if (lower.endsWith('.json') || lower.endsWith('.pec')) {
             try {
                 const text = await file.text();
@@ -1420,17 +1286,16 @@ async function handleDroppedOrSelectedFiles(fileList) {
                 }
 
                 document.getElementById('chartFileName').textContent = name;
-                document.getElementById('chartFileName').classList.replace('text-slate-400', 'text-cyan-300');
+                document.getElementById('chartFileName').className = 'text-xs text-cyan-300 truncate font-medium';
                 document.getElementById('noteCountText').textContent = `総ノーツ数: ${parsed.totalNotes}`;
                 document.getElementById('chartStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]';
-                document.getElementById('chartSlotCard').classList.replace('border-rose-500/30', 'border-cyan-500/50');
+                document.getElementById('chartSlotCard').className = 'p-2.5 rounded-xl bg-slate-900/90 border border-cyan-500/50 flex flex-col justify-between transition-colors';
 
                 showToast(`譜面を読み込みました (${parsed.totalNotes}ノーツ)`, 'success');
             } catch (err) {
                 showToast(`譜面の読み込みエラー: ${err.message}`, 'error');
             }
         }
-        // 音源ファイル (.mp3 / .ogg / .wav / .m4a)
         else if (lower.match(/\.(mp3|ogg|wav|m4a|aac|flac)$/)) {
             try {
                 showToast(`音源をデコード中: ${name}`, 'info');
@@ -1443,10 +1308,10 @@ async function handleDroppedOrSelectedFiles(fileList) {
                 const mins = Math.floor(audioBuf.duration / 60);
                 const secs = Math.floor(audioBuf.duration % 60).toString().padStart(2, '0');
                 document.getElementById('audioFileName').textContent = name;
-                document.getElementById('audioFileName').classList.replace('text-slate-400', 'text-amber-300');
+                document.getElementById('audioFileName').className = 'text-xs text-amber-300 truncate font-medium';
                 document.getElementById('audioDurationText').textContent = `再生時間: ${mins}:${secs}`;
                 document.getElementById('audioStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]';
-                document.getElementById('audioSlotCard').classList.replace('border-rose-500/30', 'border-amber-500/50');
+                document.getElementById('audioSlotCard').className = 'p-2.5 rounded-xl bg-slate-900/90 border border-amber-500/50 flex flex-col justify-between transition-colors';
 
                 if (!AppState.title) {
                     AppState.title = name.replace(/\.(mp3|ogg|wav|m4a|aac|flac)$/i, '');
@@ -1458,7 +1323,6 @@ async function handleDroppedOrSelectedFiles(fileList) {
                 showToast(`音源デコード失敗: ${err.message}`, 'error');
             }
         }
-        // 背景画像 (.png / .jpg / .jpeg / .webp)
         else if (lower.match(/\.(png|jpg|jpeg|webp)$/)) {
             try {
                 const url = URL.createObjectURL(file);
@@ -1467,9 +1331,9 @@ async function handleDroppedOrSelectedFiles(fileList) {
                     AppState.bgImage = img;
                     AppState.bgFileName = name;
                     document.getElementById('bgFileName').textContent = name;
-                    document.getElementById('bgFileName').classList.replace('text-slate-400', 'text-pink-300');
+                    document.getElementById('bgFileName').className = 'text-xs text-pink-300 truncate font-medium';
                     document.getElementById('bgStatusDot').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]';
-                    document.getElementById('bgSlotCard').classList.replace('border-white/10', 'border-pink-500/50');
+                    document.getElementById('bgSlotCard').className = 'p-2.5 rounded-xl bg-slate-900/90 border border-pink-500/50 flex flex-col justify-between transition-colors';
                     showToast(`背景イラストを設定しました: ${name}`, 'success');
                 };
                 img.src = url;
@@ -1563,18 +1427,13 @@ function updatePlayReadyState() {
     }
 }
 
-// ----------------------------------------------------------------------------
-// 6. 全画面表示切り替え (Fullscreen API + iOS Safari疑似全画面フォールバック)
-// ----------------------------------------------------------------------------
 function toggleFullscreen() {
     const docEl = document.documentElement;
     const isNativeFS = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
 
     if (!isNativeFS && !AppState.pseudoFullscreen) {
         if (docEl.requestFullscreen) {
-            docEl.requestFullscreen().catch(() => {
-                enablePseudoFullscreen();
-            });
+            docEl.requestFullscreen().catch(() => { enablePseudoFullscreen(); });
         } else if (docEl.webkitRequestFullscreen) {
             docEl.webkitRequestFullscreen();
         } else {
@@ -1615,18 +1474,9 @@ function updateFullscreenLabels() {
     });
 }
 
-document.addEventListener('fullscreenchange', () => {
-    resizeCanvas();
-    updateFullscreenLabels();
-});
-document.addEventListener('webkitfullscreenchange', () => {
-    resizeCanvas();
-    updateFullscreenLabels();
-});
+document.addEventListener('fullscreenchange', () => { resizeCanvas(); updateFullscreenLabels(); });
+document.addEventListener('webkitfullscreenchange', () => { resizeCanvas(); updateFullscreenLabels(); });
 
-// ----------------------------------------------------------------------------
-// 7. Canvas レンダラー＆ゲームループ
-// ----------------------------------------------------------------------------
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 let lastFrameTime = 0;
@@ -1677,11 +1527,10 @@ function evalEventList(events, time, propStart, propEnd, defaultVal) {
     return safeNum(events[events.length - 1][propEnd], defaultVal);
 }
 
-// 判定ウィンドウ (秒)
 const JUDGE_WINDOW = {
-    PERFECT: 0.080, // ±80ms
-    GOOD: 0.160,    // ±160ms
-    BAD: 0.200      // ±200ms
+    PERFECT: 0.080,
+    GOOD: 0.160,
+    BAD: 0.200
 };
 
 function registerJudgement(result, note, worldX, worldY) {
@@ -1729,22 +1578,12 @@ function spawnHitEffect(x, y, color) {
             size: 3 + Math.random() * 3
         });
     }
-    AppState.effects.push({
-        x, y, color,
-        age: 0,
-        maxAge: 0.35,
-        particles
-    });
+    AppState.effects.push({ x, y, color, age: 0, maxAge: 0.35, particles });
 }
 
 function spawnJudgePopup(x, y, text, color) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    AppState.judgePopups.push({
-        x, y: y - 24,
-        text, color,
-        age: 0,
-        maxAge: 0.45
-    });
+    AppState.judgePopups.push({ x, y: y - 24, text, color, age: 0, maxAge: 0.45 });
 }
 
 function gameLoop(timestamp) {
@@ -1765,7 +1604,6 @@ function renderAndUpdate(dt) {
     const W = Math.max(1, canvas.width / dpr);
     const H = Math.max(1, canvas.height / dpr);
 
-    // 1. 背景の描画
     ctx.fillStyle = '#070b14';
     ctx.fillRect(0, 0, W, H);
 
@@ -1803,7 +1641,6 @@ function renderAndUpdate(dt) {
     const rawMusicTime = soundEngine.getCurrentTime();
     const chartTime = rawMusicTime - safeNum(AppState.chart.offset, 0) - (safeNum(AppState.settings.offsetMs, 0) / 1000);
 
-    // 楽曲終了チェック
     const maxEndTime = Math.max(1, safeNum(AppState.audioDuration, 10)) + 1.2;
     if (rawMusicTime >= maxEndTime && !AppState.isPaused) {
         finishGame();
@@ -1816,7 +1653,6 @@ function renderAndUpdate(dt) {
     const speedUnitScale = H * 0.62;
     const isHighlightEnabled = Boolean(AppState.settings.multiHighlight);
 
-    // 2. 各判定ラインとノーツの更新・描画
     AppState.chart.judgeLines.forEach(line => {
         const normX = evalEventList(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
         const normY = evalEventList(line.moveEvents, chartTime, 'startY', 'endY', 0.2);
@@ -1835,7 +1671,6 @@ function renderAndUpdate(dt) {
         ctx.translate(lineX, lineY);
         ctx.rotate(angleRad);
 
-        // 判定ライン本体の描画
         if (alpha > 0.01) {
             ctx.save();
             ctx.globalAlpha = alpha;
@@ -1854,8 +1689,7 @@ function renderAndUpdate(dt) {
             ctx.restore();
         }
 
-        // ノーツループ
-        const dirSign = -1; // aboveは上(-Y)から降下
+        const dirSign = -1;
         for (let i = 0; i < line.notes.length; i++) {
             const note = line.notes[i];
             if (note.judged) continue;
@@ -1865,7 +1699,6 @@ function renderAndUpdate(dt) {
             const worldNoteX = lineX + localX * cosA;
             const worldNoteY = lineY + localX * sinA;
 
-            // --- A. 判定ロジック (オートプレイ / 手動マルチタッチ) ---
             if (!AppState.isPaused) {
                 if (AppState.settings.autoPlay) {
                     if (note.type !== 3) {
@@ -1894,11 +1727,13 @@ function renderAndUpdate(dt) {
                         }
                     }
                 } else {
-                    // 手動マルチタッチ判定
+                    // ========================================================
+                    // ★ 判定幅の超大幅拡大：
+                    // ラインからの垂直方向（projY）および横方向（projX）の許容範囲を巨大に拡張
+                    // ========================================================
                     const absDiff = Math.abs(timeDiff);
-                    const hitRadius = Math.max(noteWidthBase * 1.15, W * 0.11);
-                    // ホールド始点専用のワイド当たり判定（通常の1.45倍）
-                    const holdHitRadius = Math.max(noteWidthBase * 1.65, W * 0.16);
+                    const lineTouchVerticalTolerance = H * 1.5; // 画面全体の高さ以上に広げ、垂直方向はどこを触ってもOKに
+                    const hitHorizontalWidth = W * 0.45;        // 左右の許容範囲も画面幅のほぼ半分まで超拡大
 
                     let matchedPointer = null;
                     let matchedHoldStartPointer = null;
@@ -1911,20 +1746,16 @@ function renderAndUpdate(dt) {
                         }
                         const relX = ptr.x - lineX;
                         const relY = ptr.y - lineY;
-                        const projX = relX * cosA + relY * sinA;
-                        const projY = -relX * sinA + relY * cosA;
-                        const distX = Math.abs(projX - localX);
+                        const projX = relX * cosA + relY * sinA; // ライン上の位置 (X)
+                        const projY = -relX * sinA + relY * cosA; // 判定ラインからの垂直距離 (Y)
 
-                        if (distX <= hitRadius && Math.abs(projY) <= H * 0.45) {
+                        if (Math.abs(projX - localX) <= hitHorizontalWidth && Math.abs(projY) <= lineTouchVerticalTolerance) {
                             matchedPointer = ptr;
-                        }
-                        if (distX <= holdHitRadius && Math.abs(projY) <= H * 0.55) {
                             matchedHoldStartPointer = ptr;
                         }
                     }
 
                     if (note.type === 1) {
-                        // Tap
                         if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
                             matchedPointer.justPressed = false;
                             note.judged = true;
@@ -1938,7 +1769,6 @@ function renderAndUpdate(dt) {
                             continue;
                         }
                     } else if (note.type === 2) {
-                        // Drag
                         if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
                             note.judged = true;
                             registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
@@ -1950,7 +1780,6 @@ function renderAndUpdate(dt) {
                             continue;
                         }
                     } else if (note.type === 4) {
-                        // Flick
                         if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
                             note.judged = true;
                             registerJudgement('PERFECT', note, worldNoteX, worldNoteY);
@@ -1962,9 +1791,7 @@ function renderAndUpdate(dt) {
                             continue;
                         }
                     } else if (note.type === 3) {
-                        // Hold（本家Phigros準拠の快適な追従・持ち替え・早離し仕様）
                         if (!note.isHolding) {
-                            // 1. 始点タップ判定（Bad判定なし・±160ms以内で確実に掴める）
                             if (matchedHoldStartPointer && matchedHoldStartPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
                                 matchedHoldStartPointer.justPressed = false;
                                 note.isHolding = true;
@@ -1974,13 +1801,11 @@ function renderAndUpdate(dt) {
                                 soundEngine.playHitSound(3);
                                 spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
                             } else if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                                // 始点通過後+160msを超えた見送りミスのみMiss
                                 note.judged = true;
                                 registerJudgement('MISS', note, worldNoteX, worldNoteY);
                                 continue;
                             }
                         } else {
-                            // 2. ホールド継続中：終点の200ms前からは早離ししても自動完走保証
                             const remainingToEnd = note.endTime - chartTime;
                             if (remainingToEnd <= 0.20) {
                                 note.judged = true;
@@ -1988,7 +1813,6 @@ function renderAndUpdate(dt) {
                                 continue;
                             }
 
-                            // 3. 画面上のどこかに1本でもタッチ（またはキー/マウス押下）があれば維持＆持ち替え対応
                             const hasAnyActiveTouch = AppState.pointers.size > 0;
                             if (hasAnyActiveTouch) {
                                 note.holdReleaseTimer = 0;
@@ -1998,7 +1822,6 @@ function renderAndUpdate(dt) {
                                     spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
                                 }
                             } else {
-                                // 4. 指が完全に離れた場合も180msの猶予（グレースピリオド）を付与
                                 note.holdReleaseTimer += dt;
                                 if (note.holdReleaseTimer > 0.18) {
                                     note.judged = true;
@@ -2011,8 +1834,6 @@ function renderAndUpdate(dt) {
                 }
             }
 
-            // --- B. ノーツ座標計算と描画 ---
-            // 公式JSONのnote.speedはホールド帯の長さ倍率としてのみ適用（落下アプローチ速度には掛けない）
             const approachSpeed = note.isHoldLengthSpeed ? 1.0 : note.speed;
             const headDist = (note.floorPosition - currentFloor) * speedUnitScale * approachSpeed;
             const sideFactor = note.isAbove ? dirSign : -dirSign;
@@ -2023,18 +1844,14 @@ function renderAndUpdate(dt) {
             const isHL = isHighlightEnabled && note.isHighlight;
 
             if (note.type === 3) {
-                // Hold ノーツ描画 (末端の異常な伸び・引き延ばしを完全修正)
                 const holdLenScale = note.isHoldLengthSpeed ? note.speed : approachSpeed;
                 const tailDist = (note.endFloorPosition - currentFloor) * speedUnitScale * holdLenScale;
                 
-                // ヘッドとテールの両方が画面外（上下）にある場合はスキップ
                 if ((headDist < -H * 0.5 && tailDist < -H * 0.5) || (headDist > H * 1.8 && tailDist > H * 1.8)) {
                     continue;
                 }
 
-                // ホールドが保持されている場合はヘッド位置を判定ライン（0）に固定
                 const clampedHeadDist = note.isHolding ? 0 : headDist;
-                
                 const yHead = clampedHeadDist * sideFactor;
                 const yTail = tailDist * sideFactor;
                 
@@ -2076,7 +1893,6 @@ function renderAndUpdate(dt) {
                     ctx.shadowBlur = 0;
                 }
 
-                // ホールド先頭キャップ（ヘッド）を描画（保持されていない場合のみ）
                 if (!note.isHolding) {
                     ctx.globalAlpha = 1.0;
                     if (isHL || isActivelyHeld) {
@@ -2094,7 +1910,6 @@ function renderAndUpdate(dt) {
                 }
                 ctx.restore();
             } else {
-                // 通常ノーツ (Tap / Drag / Flick)
                 const yPos = headDist * sideFactor;
                 const nw = note.type === 2 ? noteWidthBase * 0.85 : noteWidthBase;
                 const nh = noteHeightBase;
@@ -2136,13 +1951,11 @@ function renderAndUpdate(dt) {
         ctx.restore();
     });
 
-    // ポインターの justPressed フラグをフレーム末にリセット
     for (const [, ptr] of AppState.pointers) {
         ptr.justPressed = false;
         ptr.speed *= 0.6;
     }
 
-    // 3. ヒットエフェクト＆判定文字の描画
     for (let i = AppState.effects.length - 1; i >= 0; i--) {
         const ef = AppState.effects[i];
         ef.age += dt;
@@ -2190,12 +2003,10 @@ function renderAndUpdate(dt) {
         ctx.restore();
     }
 
-    // 4. プレイ画面HUD（コンボ・スコア・進行度バー・曲名・難易度）
     drawPlayHUD(W, H, rawMusicTime);
 }
 
 function drawPlayHUD(W, H, rawMusicTime) {
-    // 上部進行度バー
     const duration = Math.max(1, safeNum(AppState.audioDuration, 10));
     const progress = Math.max(0, Math.min(1, rawMusicTime / duration));
     ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
@@ -2203,7 +2014,6 @@ function drawPlayHUD(W, H, rawMusicTime) {
     ctx.fillStyle = '#00f0ff';
     ctx.fillRect(0, 0, W * progress, 4);
 
-    // 右上: 7桁ゼロ埋めスコア
     const scoreStr = AppState.stats.score.toString().padStart(7, '0');
     ctx.save();
     ctx.font = `700 ${Math.round(H * 0.048)}px 'Rajdhani', sans-serif`;
@@ -2214,7 +2024,6 @@ function drawPlayHUD(W, H, rawMusicTime) {
     ctx.fillText(scoreStr, W - W * 0.025, H * 0.068);
     ctx.restore();
 
-    // 中央上部: COMBO 表示 (3コンボ以上で表示)
     if (AppState.stats.combo >= 3) {
         ctx.save();
         ctx.textAlign = 'center';
@@ -2230,7 +2039,6 @@ function drawPlayHUD(W, H, rawMusicTime) {
         ctx.restore();
     }
 
-    // 左下: 楽曲タイトル & 右下: 難易度
     ctx.save();
     ctx.font = `700 ${Math.round(H * 0.024)}px 'Noto Sans JP', sans-serif`;
     ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
@@ -2243,9 +2051,6 @@ function drawPlayHUD(W, H, rawMusicTime) {
     ctx.restore();
 }
 
-// ----------------------------------------------------------------------------
-// 8. ゲーム開始・一時停止・リザルト制御
-// ----------------------------------------------------------------------------
 async function startGame() {
     if (!AppState.chart || !AppState.audioBuffer) {
         showToast("譜面と音源の両方を読み込んでください", "error");
@@ -2265,15 +2070,7 @@ async function startGame() {
         });
     });
 
-    AppState.stats = {
-        perfect: 0,
-        good: 0,
-        bad: 0,
-        miss: 0,
-        combo: 0,
-        maxCombo: 0,
-        score: 0
-    };
+    AppState.stats = { perfect: 0, good: 0, bad: 0, miss: 0, combo: 0, maxCombo: 0, score: 0 };
     AppState.effects = [];
     AppState.judgePopups = [];
     AppState.pointers.clear();
@@ -2373,9 +2170,6 @@ function finishGame() {
     document.getElementById('resultModal').classList.remove('hidden');
 }
 
-// ----------------------------------------------------------------------------
-// 9. マルチタッチ・マウス・キーボード入力イベント
-// ----------------------------------------------------------------------------
 function getCanvasCoords(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -2392,12 +2186,7 @@ canvas.addEventListener('touchstart', (e) => {
     soundEngine.init();
     for (const touch of Array.from(e.changedTouches)) {
         const pos = getCanvasCoords(touch.clientX, touch.clientY);
-        AppState.pointers.set(touch.identifier, {
-            x: pos.x,
-            y: pos.y,
-            justPressed: true,
-            speed: 0
-        });
+        AppState.pointers.set(touch.identifier, { x: pos.x, y: pos.y, justPressed: true, speed: 0 });
     }
 }, { passive: false });
 
@@ -2432,12 +2221,7 @@ canvas.addEventListener('touchcancel', (e) => {
 canvas.addEventListener('mousedown', (e) => {
     soundEngine.init();
     const pos = getCanvasCoords(e.clientX, e.clientY);
-    AppState.pointers.set('mouse', {
-        x: pos.x,
-        y: pos.y,
-        justPressed: true,
-        speed: 0
-    });
+    AppState.pointers.set('mouse', { x: pos.x, y: pos.y, justPressed: true, speed: 0 });
 });
 
 window.addEventListener('mousemove', (e) => {
@@ -2456,46 +2240,31 @@ window.addEventListener('mouseup', () => {
 
 window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
-
-    // 音ズレ調整モーダル中のSpaceキータップ計測
     if (calibrator.isActive && e.code === 'Space') {
         e.preventDefault();
         calibrator.recordTap();
         return;
     }
-
     if (e.key === 'Escape') {
-        if (calibrator.isActive) {
-            calibrator.close();
-            return;
-        }
+        if (calibrator.isActive) { calibrator.close(); return; }
         if (AppState.isPlaying) {
             if (AppState.isPaused) resumeGame();
             else pauseGame();
         }
         return;
     }
-
     if (!AppState.isPlaying || AppState.isPaused) return;
     const keyId = `key_${e.code}`;
-    AppState.pointers.set(keyId, {
-        x: 0,
-        y: 0,
-        justPressed: true,
-        speed: 10,
-        isKeyboard: true
-    });
+    AppState.pointers.set(keyId, { x: 0, y: 0, justPressed: true, speed: 10, isKeyboard: true });
 });
 
 window.addEventListener('keyup', (e) => {
     AppState.pointers.delete(`key_${e.code}`);
 });
 
-// ----------------------------------------------------------------------------
-// 10. UIイベントリスナー＆画面全体ドラッグ＆ドロップ初期化
-// ----------------------------------------------------------------------------
 function showToast(message, type = 'info') {
     const container = document.getElementById('toastContainer');
+    if (!container) return;
     const toast = document.createElement('div');
     const colors = {
         success: 'bg-emerald-950/95 border-emerald-400 text-emerald-200',
@@ -2512,76 +2281,36 @@ function showToast(message, type = 'info') {
     }, 3200);
 }
 
-// 画面全体ドラッグ＆ドロップイベント
 let dragCounter = 0;
 const dropOverlay = document.getElementById('dropOverlay');
 
-window.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    dragCounter++;
-    dropOverlay.classList.remove('hidden');
-});
-
-window.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
-    }
-});
-
+window.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropOverlay.classList.remove('hidden'); });
+window.addEventListener('dragover', (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
 window.addEventListener('dragleave', (e) => {
     e.preventDefault();
     dragCounter--;
-    if (dragCounter <= 0) {
-        dragCounter = 0;
-        dropOverlay.classList.add('hidden');
-    }
+    if (dragCounter <= 0) { dragCounter = 0; dropOverlay.classList.add('hidden'); }
 });
-
 window.addEventListener('drop', async (e) => {
     e.preventDefault();
     dragCounter = 0;
     dropOverlay.classList.add('hidden');
-
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         await handleDroppedOrSelectedFiles(e.dataTransfer.files);
     }
 });
 
-// ファイル・フォルダ選択ボタン
-document.getElementById('selectFilesBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('fileInput').click();
-});
-document.getElementById('selectFolderBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.getElementById('folderInput').click();
-});
-document.getElementById('clearAssetsBtn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    clearAllAssets();
-});
-document.getElementById('menuDropZone').addEventListener('click', () => {
-    document.getElementById('fileInput').click();
-});
-document.getElementById('fileInput').addEventListener('change', (e) => {
-    handleDroppedOrSelectedFiles(e.target.files);
-    e.target.value = '';
-});
-document.getElementById('folderInput').addEventListener('change', (e) => {
-    handleDroppedOrSelectedFiles(e.target.files);
-    e.target.value = '';
-});
+document.getElementById('selectFilesBtn').addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('fileInput').click(); });
+document.getElementById('selectFolderBtn').addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('folderInput').click(); });
+document.getElementById('clearAssetsBtn').addEventListener('click', (e) => { e.stopPropagation(); clearAllAssets(); });
+document.getElementById('menuDropZone').addEventListener('click', () => { document.getElementById('fileInput').click(); });
+document.getElementById('fileInput').addEventListener('change', (e) => { handleDroppedOrSelectedFiles(e.target.files); e.target.value = ''; });
+document.getElementById('folderInput').addEventListener('change', (e) => { handleDroppedOrSelectedFiles(e.target.files); e.target.value = ''; });
 
-// 全画面切り替えボタン (複数配置に対応)
 document.querySelectorAll('.fullscreenToggleBtn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleFullscreen();
-    });
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
 });
 
-// Arcaea風 音ズレ調整モーダル操作イベント
 document.getElementById('openCalibrationBtn').addEventListener('click', () => calibrator.open());
 document.getElementById('closeCalibrationBtn').addEventListener('click', () => calibrator.close());
 document.getElementById('calCancelBtn').addEventListener('click', () => calibrator.close());
@@ -2589,13 +2318,8 @@ document.getElementById('calApplyBtn').addEventListener('click', () => calibrato
 document.getElementById('calResetBtn').addEventListener('click', () => calibrator.reset());
 
 const calTapPad = document.getElementById('calTapPad');
-calTapPad.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    calibrator.recordTap();
-}, { passive: false });
-calTapPad.addEventListener('mousedown', (e) => {
-    if (e.button === 0) calibrator.recordTap();
-});
+calTapPad.addEventListener('touchstart', (e) => { e.preventDefault(); calibrator.recordTap(); }, { passive: false });
+calTapPad.addEventListener('mousedown', (e) => { if (e.button === 0) calibrator.recordTap(); });
 
 document.querySelectorAll('.calFineBtn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2604,7 +2328,6 @@ document.querySelectorAll('.calFineBtn').forEach(btn => {
     });
 });
 
-// 設定スライダー＆トグルのバインディング
 document.getElementById('noteScaleSlider').addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     AppState.settings.noteScale = val;
@@ -2623,41 +2346,22 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
     document.getElementById('speedValText').textContent = `${val.toFixed(2)}x`;
 });
 
-document.getElementById('highlightToggle').addEventListener('change', (e) => {
-    AppState.settings.multiHighlight = e.target.checked;
-});
+document.getElementById('highlightToggle').addEventListener('change', (e) => { AppState.settings.multiHighlight = e.target.checked; });
+document.getElementById('autoPlayToggle').addEventListener('change', (e) => { AppState.settings.autoPlay = e.target.checked; });
+document.getElementById('hitSoundToggle').addEventListener('change', (e) => { AppState.settings.hitSound = e.target.checked; });
 
-document.getElementById('autoPlayToggle').addEventListener('change', (e) => {
-    AppState.settings.autoPlay = e.target.checked;
-});
-
-document.getElementById('hitSoundToggle').addEventListener('change', (e) => {
-    AppState.settings.hitSound = e.target.checked;
-});
-
-// ゲーム進行コントロールボタン
 document.getElementById('startGameBtn').addEventListener('click', startGame);
 document.getElementById('pauseBtn').addEventListener('click', pauseGame);
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
-document.getElementById('backToMenuBtn').addEventListener('click', backToMenu);
+document.getElementById('pauseBackToMenuBtn').addEventListener('click', backToMenu);
 document.getElementById('resultRetryBtn').addEventListener('click', startGame);
 document.getElementById('resultMenuBtn').addEventListener('click', backToMenu);
 
-// ガイドモーダル開閉
-document.getElementById('openGuideBtn').addEventListener('click', () => {
-    document.getElementById('guideModal').classList.remove('hidden');
-});
-document.getElementById('closeGuideBtn').addEventListener('click', () => {
-    document.getElementById('guideModal').classList.add('hidden');
-});
-document.getElementById('closeGuideBtnBottom').addEventListener('click', () => {
-    document.getElementById('guideModal').classList.add('hidden');
-});
+document.getElementById('openGuideBtn').addEventListener('click', () => { document.getElementById('guideModal').classList.remove('hidden'); });
+document.getElementById('closeGuideBtn').addEventListener('click', () => { document.getElementById('guideModal').classList.add('hidden'); });
+document.getElementById('closeGuideBtnBottom').addEventListener('click', () => { document.getElementById('guideModal').classList.add('hidden'); });
 
-// ----------------------------------------------------------------------------
-// 11. 起動時初期化
-// ----------------------------------------------------------------------------
 window.onload = function () {
     resizeCanvas();
     updatePlayReadyState();
