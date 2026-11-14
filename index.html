@@ -2023,16 +2023,26 @@ function renderAndUpdate(dt) {
             const isHL = isHighlightEnabled && note.isHighlight;
 
             if (note.type === 3) {
-                // Hold ノーツ描画
+                // Hold ノーツ描画 (末端の異常な伸び・引き延ばしを完全修正)
                 const holdLenScale = note.isHoldLengthSpeed ? note.speed : approachSpeed;
                 const tailDist = (note.endFloorPosition - currentFloor) * speedUnitScale * holdLenScale;
-                const clampedHeadDist = note.isHolding ? 0 : headDist;
-                if (tailDist < -H * 0.2 || clampedHeadDist > H * 1.8) continue;
+                
+                // ヘッドとテールの両方が画面外（上下）にある場合はスキップ
+                if ((headDist < -H * 0.5 && tailDist < -H * 0.5) || (headDist > H * 1.8 && tailDist > H * 1.8)) {
+                    continue;
+                }
 
+                // ホールドが保持されている場合はヘッド位置を判定ライン（0）に固定
+                const clampedHeadDist = note.isHolding ? 0 : headDist;
+                
                 const yHead = clampedHeadDist * sideFactor;
                 const yTail = tailDist * sideFactor;
+                
                 const bodyTop = Math.min(yHead, yTail);
-                const bodyHeight = Math.abs(yTail - yHead);
+                const bodyBottom = Math.max(yHead, yTail);
+                const bodyHeight = bodyBottom - bodyTop;
+
+                if (bodyHeight <= 0.5) continue;
 
                 ctx.save();
                 const isActivelyHeld = note.isHolding && note.holdReleaseTimer <= 0.02;
@@ -2066,19 +2076,21 @@ function renderAndUpdate(dt) {
                     ctx.shadowBlur = 0;
                 }
 
-                // ホールド先頭キャップ（ヘッド）
-                ctx.globalAlpha = 1.0;
-                if (isHL || isActivelyHeld) {
-                    ctx.shadowColor = isHL ? '#ffd700' : '#00f0ff';
-                    ctx.shadowBlur = 16;
-                    ctx.fillStyle = isHL ? '#ffd700' : '#a5f3fc';
-                    ctx.fillRect(localX - noteWidthBase * 0.54, yHead - noteHeightBase * 0.65, noteWidthBase * 1.08, noteHeightBase * 1.3);
-                    ctx.shadowBlur = 0;
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(localX - noteWidthBase * 0.48, yHead - noteHeightBase * 0.42, noteWidthBase * 0.96, noteHeightBase * 0.84);
-                } else {
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(localX - noteWidthBase * 0.5, yHead - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+                // ホールド先頭キャップ（ヘッド）を描画（保持されていない場合のみ）
+                if (!note.isHolding) {
+                    ctx.globalAlpha = 1.0;
+                    if (isHL || isActivelyHeld) {
+                        ctx.shadowColor = isHL ? '#ffd700' : '#00f0ff';
+                        ctx.shadowBlur = 16;
+                        ctx.fillStyle = isHL ? '#ffd700' : '#a5f3fc';
+                        ctx.fillRect(localX - noteWidthBase * 0.54, yHead - noteHeightBase * 0.65, noteWidthBase * 1.08, noteHeightBase * 1.3);
+                        ctx.shadowBlur = 0;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(localX - noteWidthBase * 0.48, yHead - noteHeightBase * 0.42, noteWidthBase * 0.96, noteHeightBase * 0.84);
+                    } else {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(localX - noteWidthBase * 0.5, yHead - noteHeightBase * 0.5, noteWidthBase, noteHeightBase);
+                    }
                 }
                 ctx.restore();
             } else {
