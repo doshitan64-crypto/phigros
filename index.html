@@ -165,7 +165,7 @@
                             PHIGROS SIMULATOR
                             <span class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-bold">日本語版</span>
                         </h1>
-                        <p class="text-xs text-slate-400">判定幅超拡大・マルチタッチ・Arcaea式音ズレ調整対応</p>
+                        <p class="text-xs text-slate-400">横方向厳密・縦方向どこでもタップ判定・マルチタッチ・Arcaea式音ズレ調整対応</p>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -505,9 +505,9 @@
             </div>
             <div class="p-6 overflow-y-auto custom-scroll space-y-5 text-sm text-slate-300 leading-relaxed">
                 <div>
-                    <h3 class="text-cyan-400 font-bold text-base mb-1.5">1. 判定幅の超大幅拡大</h3>
+                    <h3 class="text-cyan-400 font-bold text-base mb-1.5">1. 判定仕様（横方向厳密 ＆ 縦方向どこでも）</h3>
                     <p>
-                        判定ラインの上下方向（localY）および横方向の許容範囲を極限まで広げ、ノーツ付近を大雑把にタップするだけで確実に反応するように調整しています。
+                        横方向はノーツの配置位置（厳密な横幅）に合わせて判定しつつ、縦方向（判定ラインからの上下のズレ）はどこをタッチしても反応する本家仕様に調整されています。
                     </p>
                 </div>
                 <div>
@@ -1728,12 +1728,13 @@ function renderAndUpdate(dt) {
                     }
                 } else {
                     // ========================================================
-                    // ★ 判定幅の超大幅拡大：
-                    // ラインからの垂直方向（projY）および横方向（projX）の許容範囲を巨大に拡張
+                    // ★ ご要望の仕様：
+                    // 横方向(projX)は元のノーツ位置周辺に厳密に合わせ、
+                    // 縦方向(projY)は画面の上下どこを触ってもOKな仕様に調整
                     // ========================================================
                     const absDiff = Math.abs(timeDiff);
-                    const lineTouchVerticalTolerance = H * 1.5; // 画面全体の高さ以上に広げ、垂直方向はどこを触ってもOKに
-                    const hitHorizontalWidth = W * 0.45;        // 左右の許容範囲も画面幅のほぼ半分まで超拡大
+                    const lineTouchVerticalTolerance = H * 1.5; // 縦方向は画面全体でどこでも反応
+                    const hitHorizontalWidth = W * 0.09 * noteScale; // 横方向はノーツ付近の正確な範囲のみ
 
                     let matchedPointer = null;
                     let matchedHoldStartPointer = null;
