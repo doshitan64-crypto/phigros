@@ -1391,7 +1391,8 @@ class ChartParser {
         });
 
         this.markSimultaneousNotes(judgeLines);
-        return { offset, judgeLines, totalNotes };
+        const blockAreas = Array.isArray(jsonObj.blockAreaList) ? jsonObj.blockAreaList : [];
+        return { offset, judgeLines, totalNotes, blockAreas };
     }
 
     static parsePEC(pecText) {
@@ -2105,6 +2106,10 @@ document.addEventListener('webkitfullscreenchange', () => { resizeCanvas(); upda
 // =========================================================================
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const blockAreaSceneCanvas = document.createElement('canvas');
+const blockAreaSceneCtx = blockAreaSceneCanvas.getContext('2d');
+const blockAreaMaskCanvas = document.createElement('canvas');
+const blockAreaMaskCtx = blockAreaMaskCanvas.getContext('2d');
 let lastFrameTime = 0;
 
 function resizeCanvas() {
@@ -2248,6 +2253,168 @@ function gameLoop(timestamp) {
         console.error("GameLoop Error:", err);
     }
     requestAnimationFrame(gameLoop);
+}
+
+// =========================================================================
+// BlockArea描画（判定・入力処理から独立した視覚エフェクト）
+// =========================================================================
+function blockAreaEase(t, type) {
+    t = Math.max(0, Math.min(1, t));
+    switch (Number(type)) {
+        case 1: return t * t;
+        case 2: return 1 - (1 - t) * (1 - t);
+        case 3: return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        case 4: return t * t * t;
+        case 5: return 1 - Math.pow(1 - t, 3);
+        case 7: return Math.pow(t, 4);
+        case 8: return 1 - Math.pow(1 - t, 4);
+        case 10: return Math.pow(t, 5);
+        case 11: return 1 - Math.pow(1 - t, 5);
+        case 13: return 0;
+        case 14: return 1;
+        default: return t;
+    }
+}
+
+function blockAreaKeyframeValue(events, time, getValue, getEase, fallback) {
+    if (!Array.isArray(events) || events.length === 0) return fallback;
+    if (time <= safeNum(events[0].time, 0)) return getValue(events[0]);
+    for (let i = 1; i < events.length; i++) {
+        const prev = events[i - 1];
+        const next = events[i];
+        const nextTime = safeNum(next.time, 0);
+        if (time <= nextTime) {
+            const prevTime = safeNum(prev.time, 0);
+            const duration = nextTime - prevTime;
+            if (duration <= 0.000001) return getValue(next);
+            const progress = (time - prevTime) / duration;
+            const ease = getEase(next);
+            const eased = blockAreaEase(progress, ease);
+            const a = getValue(prev);
+            const b = getValue(next);
+            if (typeof a === 'number' && typeof b === 'number') return a + (b - a) * eased;
+            if (a && b && typeof a === 'object' && typeof b === 'object') {
+                const out = {};
+                for (const key of Object.keys(b)) {
+                    const av = safeNum(a[key], safeNum(b[key], 0));
+                    const bv = safeNum(b[key], av);
+                    const axisEase = ease && typeof ease === 'object' ? ease[key] : ease;
+                    const axisProgress = blockAreaEase(progress, axisEase);
+                    out[key] = av + (bv - av) * axisProgress;
+                }
+                return out;
+            }
+            return eased < 1 ? a : b;
+        }
+    }
+    return getValue(events[events.length - 1]);
+}
+
+function drawBlockAreaMask(chart, chartTime, W, H, dpr) {
+    const areas = Array.isArray(chart.blockAreas) ? chart.blockAreas : [];
+    if (!areas.length) return false;
+
+    const active = areas.filter(area =>
+        chartTime >= safeNum(area.enableTime, Infinity) &&
+        chartTime <= safeNum(area.disableTime, -Infinity)
+    );
+    if (!active.length) return false;
+
+    const pixelW = canvas.width;
+    const pixelH = canvas.height;
+    if (blockAreaMaskCanvas.width !== pixelW || blockAreaMaskCanvas.height !== pixelH) {
+        blockAreaMaskCanvas.width = pixelW;
+        blockAreaMaskCanvas.height = pixelH;
+    }
+    const mctx = blockAreaMaskCtx;
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    mctx.globalCompositeOperation = 'source-over';
+    mctx.clearRect(0, 0, pixelW, pixelH);
+
+    // 有効な領域にsubtract型が含まれる場合は、画面全体を基準にして
+    // 通常領域を追加し、subtract領域で順にくり抜く。
+    // active[0]だけを見ると、JSON上の並び順によって極性が誤る。
+    if (active.some(area => Boolean(area.isSubtract))) {
+        mctx.fillStyle = '#fff';
+        mctx.fillRect(0, 0, pixelW, pixelH);
+    }
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    for (const area of active) {
+        const tr = area.topRightPercentage || {};
+        const bl = area.bottomLeftPercentage || {};
+        const left = safeNum(bl.x, 0) * W;
+        const top = (1 - safeNum(tr.y, 1)) * H;
+        const width = (safeNum(tr.x, 1) - safeNum(bl.x, 0)) * W;
+        const height = (safeNum(tr.y, 1) - safeNum(bl.y, 0)) * H;
+        if (![left, top, width, height].every(Number.isFinite) || Math.abs(width * height) < 0.01) continue;
+
+        const move = blockAreaKeyframeValue(
+            area.moveEvents, chartTime,
+            e => e.endPosition || { x: 0, y: 0 },
+            e => ({ x: e.easeTypeX, y: e.easeTypeY }), { x: 0, y: 0 }
+        );
+        const rotation = blockAreaKeyframeValue(
+            area.rotateEvents, chartTime,
+            e => safeNum(e.rotation, 0), e => e.easeType, 0
+        );
+        const scale = blockAreaKeyframeValue(
+            area.scaleEvents, chartTime,
+            e => e.scale || { x: 1, y: 1 },
+            e => ({ x: e.easeTypeX, y: e.easeTypeY }), { x: 1, y: 1 }
+        );
+        const rotateEvent = area.rotateEvents && area.rotateEvents.length
+            ? area.rotateEvents.reduce((best, e) => safeNum(e.time, 0) <= chartTime ? e : best, area.rotateEvents[0]) : null;
+        const scaleEvent = area.scaleEvents && area.scaleEvents.length
+            ? area.scaleEvents.reduce((best, e) => safeNum(e.time, 0) <= chartTime ? e : best, area.scaleEvents[0]) : null;
+        const rotateAnchor = rotateEvent && rotateEvent.anchor ? rotateEvent.anchor : { x: 0.5, y: 0.5 };
+        const scaleAnchor = scaleEvent && scaleEvent.anchor ? scaleEvent.anchor : { x: 0.5, y: 0.5 };
+
+        // moveEvents.endPosition は移動量ではなく、BlockArea中心の目標座標。
+        // 元の矩形中心との差分だけ平行移動する（座標原点は左下）。
+        const baseCenterX = (safeNum(tr.x, 1) + safeNum(bl.x, 0)) / 2;
+        const baseCenterY = (safeNum(tr.y, 1) + safeNum(bl.y, 0)) / 2;
+        const moveDeltaX = safeNum(move.x, baseCenterX) - baseCenterX;
+        const moveDeltaY = safeNum(move.y, baseCenterY) - baseCenterY;
+
+        mctx.save();
+        mctx.translate(moveDeltaX * W, -moveDeltaY * H);
+        const rax = safeNum(rotateAnchor.x, 0.5) * W;
+        const ray = (1 - safeNum(rotateAnchor.y, 0.5)) * H;
+        mctx.translate(rax, ray);
+        mctx.rotate(-safeNum(rotation, 0) * Math.PI / 180);
+        mctx.translate(-rax, -ray);
+        const sax = safeNum(scaleAnchor.x, 0.5) * W;
+        const say = (1 - safeNum(scaleAnchor.y, 0.5)) * H;
+        mctx.translate(sax, say);
+        mctx.scale(safeNum(scale.x, 1), safeNum(scale.y, 1));
+        mctx.translate(-sax, -say);
+
+        mctx.globalCompositeOperation = area.isSubtract ? 'destination-out' : 'source-over';
+        mctx.fillStyle = '#fff';
+        mctx.fillRect(left, top, width, height);
+        mctx.restore();
+    }
+
+    // 画面全体の描画結果にマスクを適用。HUDはこの後に描画する。
+    if (blockAreaSceneCanvas.width !== pixelW || blockAreaSceneCanvas.height !== pixelH) {
+        blockAreaSceneCanvas.width = pixelW;
+        blockAreaSceneCanvas.height = pixelH;
+    }
+    blockAreaSceneCtx.setTransform(1, 0, 0, 1, 0, 0);
+    blockAreaSceneCtx.clearRect(0, 0, pixelW, pixelH);
+    blockAreaSceneCtx.drawImage(canvas, 0, 0);
+    // BlockArea領域そのものを隠す（マスクの内外を反転）。
+    blockAreaSceneCtx.globalCompositeOperation = 'destination-out';
+    blockAreaSceneCtx.drawImage(blockAreaMaskCanvas, 0, 0);
+    blockAreaSceneCtx.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pixelW, pixelH);
+    ctx.drawImage(blockAreaSceneCanvas, 0, 0);
+    ctx.restore();
+    return true;
 }
 
 function renderAndUpdate(dt) {
@@ -2717,6 +2884,7 @@ function renderAndUpdate(dt) {
         ctx.restore();
     }
 
+    drawBlockAreaMask(chart, chartTime, W, H, dpr);
     drawPlayHUD(W, H, rawMusicTime, activeSong);
 }
 
