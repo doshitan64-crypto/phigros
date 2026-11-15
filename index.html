@@ -204,19 +204,46 @@
         <canvas id="gameCanvas" class="block shadow-2xl bg-slate-950"></canvas>
 
         <!-- プレイ中HUD（全画面ボタン削除済み・一時停止のみ配置） -->
-        <div id="hudOverlay" class="hidden absolute top-0 left-0 right-0 p-3 sm:p-5 flex justify-between items-start pointer-events-none z-20">
-            <div class="flex items-center gap-2 pointer-events-auto">
-                <button id="pauseBtn" class="p-3 rounded-xl bg-slate-900/75 hover:bg-cyan-950/90 border border-white/20 hover:border-cyan-400 text-white backdrop-blur-sm transition active:scale-95 flex items-center gap-2 shadow-lg" title="一時停止 (Esc)">
-                    <svg class="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
+        <div id="hudOverlay" class="hidden absolute top-0 left-0 right-0 p-0 flex justify-between items-start pointer-events-none z-20">
+            <div class="flex items-center pointer-events-auto absolute top-1 left-1 sm:top-1.5 sm:left-1.5">
+                <button id="pauseBtn" class="p-1.5 rounded-lg bg-slate-950/45 hover:bg-cyan-950/80 border border-white/10 hover:border-cyan-400/70 text-white/90 backdrop-blur-sm transition active:scale-95 flex items-center justify-center shadow-md" title="一時停止 (Esc)" aria-label="一時停止">
+                    <svg class="w-4 h-4 sm:w-5 sm:h-5 text-cyan-300" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
                     </svg>
-                    <span class="hidden sm:inline text-xs font-bold tracking-wider">一時停止</span>
                 </button>
             </div>
 
             <!-- オートプレイバッジは常に非表示 -->
             <div id="autoBadge" class="hidden px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/70 text-amber-300 text-xs sm:text-sm font-bold tracking-widest backdrop-blur-sm shadow-[0_0_15px_rgba(255,215,0,0.3)]">
                 AUTO PLAY 稼働中
+            </div>
+        </div>
+
+        <!-- 譜面確認モード専用シーク操作（左下の折りたたみ式ドロワー） -->
+        <div id="reviewControls" class="hidden absolute bottom-3 left-3 z-30 pointer-events-auto w-[min(88%,300px)]">
+            <button id="reviewDrawerToggle" type="button" aria-expanded="false"
+                class="flex items-center gap-2 rounded-t-xl rounded-br-xl border border-cyan-400/40 bg-slate-950/85 backdrop-blur-md shadow-lg px-3 py-2 text-cyan-200 text-xs font-bold">
+                <svg id="reviewDrawerChevron" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+                譜面確認
+                <span id="reviewDrawerMiniTime" class="font-cyber text-white/80 tabular-nums">0:00.00</span>
+            </button>
+            <div id="reviewDrawerPanel" class="hidden rounded-xl rounded-tl-none border border-cyan-400/35 bg-slate-950/90 backdrop-blur-md shadow-lg px-2.5 py-2 flex flex-col gap-1.5">
+                <div class="flex items-center justify-between gap-2">
+                    <span class="text-[10px] sm:text-xs font-bold tracking-wider text-cyan-300">再生位置</span>
+                    <div class="flex items-center gap-2">
+                        <span id="reviewTimeLabel" class="font-cyber text-xs sm:text-sm text-white tabular-nums">0:00.00</span>
+                        <button id="reviewPauseBtn" type="button" title="一時停止" aria-label="一時停止" class="w-8 h-8 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/40 text-cyan-200 flex items-center justify-center">
+                            <svg id="reviewPauseIcon" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <input id="reviewSeekSlider" type="range" min="0" max="100" step="0.01" value="0" class="w-full h-1.5 accent-cyan-400 cursor-pointer" aria-label="再生位置">
+                <div class="grid grid-cols-4 gap-1.5">
+                    <button type="button" data-review-seek="-10" class="reviewSeekBtn py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-white/10 text-slate-100 text-[11px] sm:text-xs font-bold">−10秒</button>
+                    <button type="button" data-review-seek="-5" class="reviewSeekBtn py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-white/10 text-slate-100 text-[11px] sm:text-xs font-bold">−5秒</button>
+                    <button type="button" data-review-seek="5" class="reviewSeekBtn py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-white/10 text-slate-100 text-[11px] sm:text-xs font-bold">＋5秒</button>
+                    <button type="button" data-review-seek="10" class="reviewSeekBtn py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 border border-white/10 text-slate-100 text-[11px] sm:text-xs font-bold">＋10秒</button>
+                </div>
             </div>
         </div>
     </div>
@@ -486,6 +513,14 @@
                     </div>
                     <input type="checkbox" id="autoPlayToggle" class="w-4 h-4 accent-amber-400 rounded">
                 </label>
+
+                <label class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-cyan-400/25 cursor-pointer hover:border-cyan-400/60 transition">
+                    <div>
+                        <span class="text-xs font-bold text-cyan-300 block">譜面確認モード</span>
+                        <span class="text-[10px] text-slate-400">再生位置の巻き戻し・早送りが可能。判定表示のみでスコアは計算・保存されません。</span>
+                    </div>
+                    <input type="checkbox" id="reviewModeToggle" class="w-4 h-4 accent-cyan-400 rounded">
+                </label>
             </div>
 
             <div class="px-6 py-3.5 bg-slate-950 border-t border-white/10 text-right">
@@ -707,6 +742,8 @@ function safeNum(val, fallback = 0) {
 const AppState = {
     isPlaying: false,
     isPaused: false,
+    isReviewMode: false,
+    reviewSliderDragging: false,
     pseudoFullscreen: false,
     songs: [],            // 読み込まれた楽曲のリスト [{ id, key, title, composer, difficulty, chart, chartFileName, audioBuffer, audioFileName, audioDuration, bgImage, bgUrl, bgFileName }]
     selectedSongId: null, // 現在選択中の楽曲ID
@@ -717,6 +754,7 @@ const AppState = {
         bgBrightness: 0.4,
         playbackRate: 1.0,
         autoPlay: false,
+        reviewMode: false,
         hitSound: false, // ノーツを叩いた時のSEは常にオフ
         multiHighlight: true
     },
@@ -2139,6 +2177,20 @@ function getSimPhiTapResult(deltaTime) {
 }
 
 function registerJudgement(result, note, worldX, worldY, totalNotes) {
+    if (AppState.isReviewMode) {
+        const colors = {
+            PERFECT: '#ffd700',
+            GOOD: '#00f0ff',
+            BAD: '#c084fc',
+            MISS: '#fb7185'
+        };
+        if (result === 'PERFECT' || result === 'GOOD') {
+            spawnHitEffect(worldX, worldY, colors[result]);
+        }
+        spawnJudgePopup(worldX, worldY, result, colors[result] || '#ffffff');
+        return;
+    }
+
     if (result === 'PERFECT') {
         AppState.stats.perfect++;
         AppState.stats.combo++;
@@ -2245,9 +2297,16 @@ function renderAndUpdate(dt) {
 
     const maxEndTime = Math.max(1, safeNum(activeSong.audioDuration, 10)) + 1.2;
     if (rawMusicTime >= maxEndTime && !AppState.isPaused) {
-        finishGame();
-        return;
+        if (AppState.isReviewMode) {
+            backToMenu();
+            return;
+        } else {
+            finishGame();
+            return;
+        }
     }
+
+    updateReviewControls(rawMusicTime, activeSong);
 
     const noteScale = safeNum(AppState.settings.noteScale, 1.0);
     const noteWidthBase = W * 0.115 * noteScale;
@@ -2279,9 +2338,9 @@ function renderAndUpdate(dt) {
         if (alpha > 0.01) {
             ctx.save();
             ctx.globalAlpha = alpha;
-            const isFC = (AppState.stats.bad === 0 && AppState.stats.miss === 0);
-            const isAP = (isFC && AppState.stats.good === 0);
-            ctx.strokeStyle = isAP ? '#ffd700' : (isFC ? '#00f0ff' : '#ffffff');
+            const isFC = !AppState.isReviewMode && (AppState.stats.bad === 0 && AppState.stats.miss === 0);
+            const isAP = !AppState.isReviewMode && (isFC && AppState.stats.good === 0);
+            ctx.strokeStyle = AppState.isReviewMode ? '#ffffff' : (isAP ? '#ffd700' : (isFC ? '#00f0ff' : '#ffffff'));
             ctx.lineWidth = Math.max(2.5, H * 0.005);
             ctx.shadowColor = ctx.strokeStyle;
             ctx.shadowBlur = 10;
@@ -2669,17 +2728,23 @@ function drawPlayHUD(W, H, rawMusicTime, song) {
     ctx.fillStyle = '#00f0ff';
     ctx.fillRect(0, 0, W * progress, 4);
 
-    const scoreStr = AppState.stats.score.toString().padStart(7, '0');
     ctx.save();
     ctx.font = `700 ${Math.round(H * 0.048)}px 'Rajdhani', sans-serif`;
     ctx.textAlign = 'right';
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
     ctx.shadowBlur = 8;
-    ctx.fillText(scoreStr, W - W * 0.025, H * 0.068);
+    if (AppState.isReviewMode) {
+        ctx.font = `900 ${Math.round(H * 0.026)}px 'Rajdhani', sans-serif`;
+        ctx.fillStyle = '#67e8f9';
+        ctx.fillText('PRACTICE', W - W * 0.025, H * 0.068);
+    } else {
+        const scoreStr = AppState.stats.score.toString().padStart(7, '0');
+        ctx.fillText(scoreStr, W - W * 0.025, H * 0.068);
+    }
     ctx.restore();
 
-    if (AppState.stats.combo >= 3) {
+    if (!AppState.isReviewMode && AppState.stats.combo >= 3) {
         ctx.save();
         ctx.textAlign = 'center';
         ctx.fillStyle = '#ffffff';
@@ -2746,9 +2811,130 @@ async function startGame() {
 
     AppState.isPlaying = true;
     AppState.isPaused = false;
+    AppState.isReviewMode = Boolean(AppState.settings.reviewMode);
+    document.getElementById('reviewControls').classList.toggle('hidden', !AppState.isReviewMode);
+    document.getElementById('reviewDrawerPanel').classList.add('hidden');
+    document.getElementById('reviewDrawerToggle').setAttribute('aria-expanded', 'false');
+    document.getElementById('reviewDrawerChevron').classList.remove('rotate-180');
+    document.getElementById('reviewSeekSlider').max = String(Math.max(1, song.audioDuration || 1));
+    document.getElementById('reviewSeekSlider').value = '0';
+    document.getElementById('reviewTimeLabel').textContent = '0:00.00';
+    document.getElementById('reviewDrawerMiniTime').textContent = '0:00.00';
+    updateReviewPauseButton();
     resizeCanvas();
 
     await soundEngine.startMusic(song.audioBuffer, -1.2);
+}
+
+function formatReviewTime(seconds) {
+    const t = Math.max(0, safeNum(seconds, 0));
+    const minutes = Math.floor(t / 60);
+    const secs = (t % 60).toFixed(2).padStart(5, '0');
+    return `${minutes}:${secs}`;
+}
+
+function updateReviewControls(rawMusicTime, song) {
+    if (!AppState.isReviewMode || !AppState.isPlaying) return;
+    const slider = document.getElementById('reviewSeekSlider');
+    const duration = Math.max(1, safeNum(song && song.audioDuration, 1));
+    slider.max = String(duration);
+    if (!AppState.reviewSliderDragging) {
+        slider.value = String(Math.max(0, Math.min(duration, rawMusicTime)));
+    }
+    const timeText = `${formatReviewTime(rawMusicTime)} / ${formatReviewTime(duration)}`;
+    document.getElementById('reviewTimeLabel').textContent = timeText;
+    document.getElementById('reviewDrawerMiniTime').textContent = formatReviewTime(rawMusicTime);
+}
+
+function resetNotesForReviewSeek(song, rawMusicTime) {
+    if (!song || !song.chart) return;
+    const chartTime = rawMusicTime
+        - safeNum(song.chart.offset, 0)
+        - (safeNum(AppState.settings.offsetMs, 0) / 1000);
+
+    song.chart.judgeLines.forEach(line => {
+        line.notes.forEach(note => {
+            note.judged = false;
+            note.isHolding = false;
+            note.holdTickTimer = 0;
+            note.holdReleaseTimer = 0;
+            note.hitResult = null;
+            note.dragTouched = false;
+            note.flickTouched = false;
+            note.holdTapTime = 0;
+            note.holdBroken = false;
+            note.holdStatus = 0;
+
+            // シーク位置より十分前のノーツは通過済みとして扱い、MISSを発生させない。
+            if (note.type === 3 && note.time < chartTime && note.endTime > chartTime) {
+                note.judged = true;
+            } else if (note.time < chartTime - JUDGE_WINDOW.MISS) {
+                note.judged = true;
+            }
+        });
+    });
+
+    AppState.stats = { perfect: 0, good: 0, bad: 0, miss: 0, combo: 0, maxCombo: 0, score: 0 };
+    AppState.effects = [];
+    AppState.judgePopups = [];
+    AppState.pointers.clear();
+}
+
+function updateReviewPauseButton() {
+    const icon = document.getElementById('reviewPauseIcon');
+    const button = document.getElementById('reviewPauseBtn');
+    if (!icon || !button) return;
+    if (AppState.isPaused) {
+        icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+        button.setAttribute('aria-label', '再生');
+        button.title = '再生';
+    } else {
+        icon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+        button.setAttribute('aria-label', '一時停止');
+        button.title = '一時停止';
+    }
+}
+
+async function toggleReviewPause() {
+    if (!AppState.isPlaying || !AppState.isReviewMode) return;
+    const song = getSelectedSong();
+    if (!song || !song.audioBuffer) return;
+    if (AppState.isPaused) {
+        AppState.isPaused = false;
+        await soundEngine.startMusic(song.audioBuffer, soundEngine.pauseOffset);
+    } else {
+        soundEngine.pauseOffset = soundEngine.getCurrentTime();
+        soundEngine.stopMusic();
+        AppState.isPaused = true;
+    }
+    updateReviewPauseButton();
+}
+
+async function seekReviewTo(rawTime) {
+    if (!AppState.isPlaying || !AppState.isReviewMode) return;
+    const song = getSelectedSong();
+    if (!song || !song.audioBuffer) return;
+
+    const duration = Math.max(0, safeNum(song.audioDuration, 0));
+    const target = Math.max(0, Math.min(duration, safeNum(rawTime, 0)));
+    const wasPlaying = !AppState.isPaused && soundEngine.isRunning;
+
+    soundEngine.pauseOffset = target;
+    soundEngine.stopMusic();
+    resetNotesForReviewSeek(song, target);
+
+    if (wasPlaying) {
+        AppState.isPaused = false;
+        await soundEngine.startMusic(song.audioBuffer, target);
+    } else {
+        AppState.isPaused = true;
+    }
+
+    document.getElementById('reviewSeekSlider').value = String(target);
+    document.getElementById('reviewTimeLabel').textContent =
+        `${formatReviewTime(target)} / ${formatReviewTime(duration)}`;
+    document.getElementById('reviewDrawerMiniTime').textContent = formatReviewTime(target);
+    updateReviewPauseButton();
 }
 
 function pauseGame() {
@@ -2760,6 +2946,7 @@ function pauseGame() {
     const song = getSelectedSong();
     document.getElementById('pauseSongTitle').textContent = song ? `${song.title} [${song.difficulty}]` : '-';
     document.getElementById('pauseModal').classList.remove('hidden');
+    if (AppState.isReviewMode) updateReviewPauseButton();
 }
 
 async function resumeGame() {
@@ -2768,13 +2955,18 @@ async function resumeGame() {
     document.getElementById('pauseModal').classList.add('hidden');
     AppState.isPaused = false;
     await soundEngine.startMusic(song.audioBuffer, soundEngine.pauseOffset);
+    if (AppState.isReviewMode) updateReviewPauseButton();
 }
 
 function backToMenu() {
     AppState.isPlaying = false;
     AppState.isPaused = false;
+    AppState.isReviewMode = false;
     soundEngine.stopMusic();
 
+    document.getElementById('reviewControls').classList.add('hidden');
+    document.getElementById('reviewDrawerPanel').classList.add('hidden');
+    document.getElementById('reviewDrawerToggle').setAttribute('aria-expanded', 'false');
     document.getElementById('hudOverlay').classList.add('hidden');
     document.getElementById('pauseModal').classList.add('hidden');
     document.getElementById('resultModal').classList.add('hidden');
@@ -2784,6 +2976,13 @@ function backToMenu() {
 }
 
 function finishGame() {
+    if (AppState.isReviewMode) {
+        const song = getSelectedSong();
+        soundEngine.pauseOffset = song ? safeNum(song.audioDuration, 0) : soundEngine.getCurrentTime();
+        soundEngine.stopMusic();
+        AppState.isPaused = true;
+        return;
+    }
     AppState.isPlaying = false;
     AppState.isPaused = false;
     soundEngine.stopMusic();
@@ -3074,10 +3273,47 @@ document.getElementById('speedSlider').addEventListener('input', (e) => {
 });
 document.getElementById('highlightToggle').addEventListener('change', (e) => { AppState.settings.multiHighlight = e.target.checked; });
 document.getElementById('autoPlayToggle').addEventListener('change', (e) => { AppState.settings.autoPlay = e.target.checked; });
+document.getElementById('reviewModeToggle').addEventListener('change', (e) => {
+    AppState.settings.reviewMode = e.target.checked;
+});
+
+document.getElementById('reviewDrawerToggle').addEventListener('click', () => {
+    const panel = document.getElementById('reviewDrawerPanel');
+    const isOpening = panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !isOpening);
+    document.getElementById('reviewDrawerToggle').setAttribute('aria-expanded', String(isOpening));
+    document.getElementById('reviewDrawerChevron').classList.toggle('rotate-180', isOpening);
+});
+document.getElementById('reviewPauseBtn').addEventListener('click', toggleReviewPause);
+
+document.querySelectorAll('.reviewSeekBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const delta = parseFloat(btn.getAttribute('data-review-seek')) || 0;
+        seekReviewTo(soundEngine.getCurrentTime() + delta);
+    });
+});
+
+const reviewSeekSlider = document.getElementById('reviewSeekSlider');
+reviewSeekSlider.addEventListener('pointerdown', () => { AppState.reviewSliderDragging = true; });
+reviewSeekSlider.addEventListener('pointerup', () => { AppState.reviewSliderDragging = false; });
+reviewSeekSlider.addEventListener('input', () => {
+    const song = getSelectedSong();
+    const duration = Math.max(1, safeNum(song && song.audioDuration, 1));
+    document.getElementById('reviewTimeLabel').textContent =
+        `${formatReviewTime(parseFloat(reviewSeekSlider.value))} / ${formatReviewTime(duration)}`;
+    document.getElementById('reviewDrawerMiniTime').textContent = formatReviewTime(parseFloat(reviewSeekSlider.value));
+});
+reviewSeekSlider.addEventListener('change', () => {
+    AppState.reviewSliderDragging = false;
+    seekReviewTo(parseFloat(reviewSeekSlider.value));
+});
 
 // ゲーム進行ボタン
 document.getElementById('startGameBtn').addEventListener('click', startGame);
-document.getElementById('pauseBtn').addEventListener('click', pauseGame);
+document.getElementById('pauseBtn').addEventListener('click', () => {
+    if (AppState.isPaused) resumeGame();
+    else pauseGame();
+});
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
 document.getElementById('pauseBackToMenuBtn').addEventListener('click', backToMenu);
