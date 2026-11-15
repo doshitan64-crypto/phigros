@@ -114,6 +114,19 @@
             background: rgba(0, 240, 255, 0.45);
             border-radius: 3px;
         }
+
+
+        /* スマートフォン横画面のみ、選曲リストとジャケットを横並びにする */
+        @media screen and (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
+            #mainMenu > main {
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+                grid-template-rows: minmax(0, 1fr) !important;
+            }
+            #mainMenu > main > section {
+                grid-column: auto !important;
+                min-width: 0;
+            }
+        }
     </style>
 </head>
 <body class="bg-grid relative flex items-center justify-center">
@@ -729,6 +742,115 @@ function saveBestScoresToDevice() {
     try {
         localStorage.setItem(SCORES_STORAGE_KEY, JSON.stringify(AppState.bestScores));
     } catch (e) {}
+}
+
+
+// =========================================================================
+// 取り込んだ楽曲ファイルを端末内 (IndexedDB) に保存
+// =========================================================================
+const SONG_LIBRARY_DB_NAME = 'phigros_sim_song_library';
+const SONG_LIBRARY_DB_VERSION = 1;
+let songLibraryDbPromise = null;
+
+function openSongLibraryDb() {
+    if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDBを利用できません'));
+    if (!songLibraryDbPromise) {
+        songLibraryDbPromise = new Promise((resolve, reject) => {
+            const request = indexedDB.open(SONG_LIBRARY_DB_NAME, SONG_LIBRARY_DB_VERSION);
+            request.onupgradeneeded = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains('songs')) db.createObjectStore('songs', { keyPath: 'id' });
+                if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error || new Error('端末保存を開けません'));
+        });
+    }
+    return songLibraryDbPromise;
+}
+
+async function saveSongLibraryRecord(song) {
+    if (!song) return;
+    const db = await openSongLibraryDb();
+    const record = {
+        id: song.id,
+        title: song.title,
+        composer: song.composer,
+        difficulty: song.difficulty,
+        sourceFiles: (song.sourceFiles || []).map(file => ({ name: file.name, type: file.type || '', blob: file }))
+    };
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction('songs', 'readwrite');
+        tx.objectStore('songs').put(record);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('楽曲を保存できません'));
+        tx.onabort = () => reject(tx.error || new Error('楽曲の保存が中断されました'));
+    });
+}
+
+async function saveSelectedSongId() {
+    const db = await openSongLibraryDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction('meta', 'readwrite');
+        tx.objectStore('meta').put({ key: 'selectedSongId', value: AppState.selectedSongId });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('選択状態を保存できません'));
+    });
+}
+
+async function deleteSongLibraryRecord(songId) {
+    const db = await openSongLibraryDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction('songs', 'readwrite');
+        tx.objectStore('songs').delete(songId);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('保存データを削除できません'));
+    });
+}
+
+async function clearSongLibraryRecords() {
+    const db = await openSongLibraryDb();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(['songs', 'meta'], 'readwrite');
+        tx.objectStore('songs').clear();
+        tx.objectStore('meta').put({ key: 'selectedSongId', value: null });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('保存データを消去できません'));
+    });
+}
+
+async function restoreSongLibraryFromDevice() {
+    try {
+        const db = await openSongLibraryDb();
+        const records = await new Promise((resolve, reject) => {
+            const tx = db.transaction(['songs', 'meta'], 'readonly');
+            const songsRequest = tx.objectStore('songs').getAll();
+            const selectedRequest = tx.objectStore('meta').get('selectedSongId');
+            tx.oncomplete = () => resolve({ songs: songsRequest.result || [], selectedId: selectedRequest.result ? selectedRequest.result.value : null });
+            tx.onerror = () => reject(tx.error || new Error('保存データを読み込めません'));
+        });
+
+        for (const record of records.songs) {
+            try {
+                const files = (record.sourceFiles || []).map(item => new File([item.blob], item.name, { type: item.type || item.blob.type || '' }));
+                const entry = await createSongEntryFromFileGroup(files, record.title);
+                if (!entry) continue;
+                entry.id = record.id;
+                entry.title = record.title || entry.title;
+                entry.composer = record.composer || entry.composer;
+                entry.difficulty = record.difficulty || entry.difficulty;
+                AppState.songs.push(entry);
+            } catch (e) {
+                console.error('楽曲の復元に失敗しました:', record.title, e);
+            }
+        }
+        AppState.selectedSongId = AppState.songs.some(song => song.id === records.selectedId)
+            ? records.selectedId
+            : (AppState.songs[0] ? AppState.songs[0].id : null);
+    } catch (e) {
+        console.error('端末内の楽曲ライブラリを読み込めません:', e);
+        showToast('端末保存データを読み込めませんでした', 'error');
+    }
 }
 
 function buildSongKey(title, difficulty, totalNotes) {
@@ -1444,7 +1566,8 @@ async function createSongEntryFromFileGroup(files, fallbackName) {
         audioDuration,
         bgImage,
         bgUrl,
-        bgFileName
+        bgFileName,
+        sourceFiles: Array.from(files)
     };
 }
 
@@ -1553,6 +1676,7 @@ async function handleDroppedOrSelectedFiles(fileList) {
                     if (entry.composer && entry.composer !== 'Unknown Composer') {
                         current.composer = entry.composer;
                     }
+                    current.sourceFiles = [...(current.sourceFiles || []), ...(entry.sourceFiles || [])];
                     showToast(`「${current.title}」にデータを追加しました`, 'success');
                 } else {
                     AppState.songs.push(entry);
@@ -1572,6 +1696,13 @@ async function handleDroppedOrSelectedFiles(fileList) {
     }
 
     renderSongSelectionUI();
+    try {
+        await Promise.all(AppState.songs.map(song => saveSongLibraryRecord(song)));
+        await saveSelectedSongId();
+    } catch (e) {
+        console.error('楽曲の端末保存に失敗しました:', e);
+        showToast('楽曲を端末に保存できませんでした', 'error');
+    }
 }
 
 function removeSongById(songId) {
@@ -1580,10 +1711,12 @@ function removeSongById(songId) {
     const removed = AppState.songs[idx];
     if (removed.bgUrl) URL.revokeObjectURL(removed.bgUrl);
     AppState.songs.splice(idx, 1);
+    deleteSongLibraryRecord(songId).catch(e => console.error('保存データの削除に失敗しました:', e));
 
     if (AppState.selectedSongId === songId) {
         AppState.selectedSongId = AppState.songs.length > 0 ? AppState.songs[Math.max(0, idx - 1)].id : null;
     }
+    saveSelectedSongId().catch(e => console.error('選択状態の保存に失敗しました:', e));
     renderSongSelectionUI();
 }
 
@@ -1591,6 +1724,7 @@ function clearAllSongs() {
     AppState.songs.forEach(s => { if (s.bgUrl) URL.revokeObjectURL(s.bgUrl); });
     AppState.songs = [];
     AppState.selectedSongId = null;
+    clearSongLibraryRecords().catch(e => console.error('端末保存データの消去に失敗しました:', e));
     renderSongSelectionUI();
     showToast('楽曲リストをすべてクリアしました', 'info');
 }
@@ -1663,6 +1797,7 @@ function renderSongSelectionUI() {
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.removeSongBtn')) return;
                 AppState.selectedSongId = song.id;
+                saveSelectedSongId().catch(e => console.error('選択状態の保存に失敗しました:', e));
                 renderSongSelectionUI();
             });
 
@@ -2702,6 +2837,7 @@ document.getElementById('saveEditMetaBtn').addEventListener('click', () => {
         song.composer = document.getElementById('editComposerInput').value.trim() || 'Unknown Composer';
         song.difficulty = document.getElementById('editDiffInput').value.trim() || 'IN 15';
         renderSongSelectionUI();
+        saveSongLibraryRecord(song).catch(e => console.error('楽曲情報の保存に失敗しました:', e));
         showToast('楽曲情報を更新しました', 'success');
     }
     document.getElementById('editMetaModal').classList.add('hidden');
@@ -2763,10 +2899,11 @@ document.getElementById('openGuideBtn').addEventListener('click', () => document
 document.getElementById('closeGuideBtn').addEventListener('click', () => document.getElementById('guideModal').classList.add('hidden'));
 document.getElementById('closeGuideBtnBottom').addEventListener('click', () => document.getElementById('guideModal').classList.add('hidden'));
 
-window.onload = function () {
+window.onload = async function () {
     loadOffsetFromDevice();
     loadBestScoresFromDevice();
     resizeCanvas();
+    await restoreSongLibraryFromDevice();
     renderSongSelectionUI();
     requestAnimationFrame(gameLoop);
 };
