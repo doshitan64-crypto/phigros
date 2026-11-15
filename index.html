@@ -126,6 +126,51 @@
                 grid-column: auto !important;
                 min-width: 0;
             }
+
+            /* 右側：ジャケットの下に「ランク・スコア」と開始ボタンを横並び */
+            #mainMenu > main > section:nth-child(2) {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) auto;
+                grid-template-rows: minmax(0, 1fr) auto;
+                gap: 8px;
+                justify-content: stretch;
+            }
+            #mainMenu > main > section:nth-child(2) > div:first-child {
+                grid-column: 1 / -1;
+                grid-row: 1;
+                min-height: 0;
+                max-height: none;
+            }
+            #mainMenu > main > section:nth-child(2) > div:nth-child(2) {
+                grid-column: 1;
+                grid-row: 2;
+                width: 100%;
+                min-width: 0;
+                padding: 0;
+                align-self: stretch;
+            }
+            #mainMenu > main > section:nth-child(2) > div:nth-child(2) > div {
+                height: 100%;
+                padding: 6px 10px;
+            }
+            #mainMenu > main > section:nth-child(2) #bestClearBadge,
+            #mainMenu > main > section:nth-child(2) .phi-unskew > .text-right,
+            #mainMenu > main > section:nth-child(2) #selectedStatusHint {
+                display: none !important;
+            }
+            #mainMenu > main > section:nth-child(2) > div:nth-child(3) {
+                grid-column: 2;
+                grid-row: 2;
+                width: auto;
+                padding: 0;
+                padding-top: 0;
+                justify-content: center;
+                align-self: stretch;
+            }
+            #mainMenu > main > section:nth-child(2) #startGameBtn {
+                width: 76px;
+                height: 58px;
+            }
         }
     </style>
 </head>
@@ -2175,6 +2220,8 @@ function renderAndUpdate(dt) {
     const speedUnitScale = H * 0.62;
     const isHighlightEnabled = Boolean(AppState.settings.multiHighlight);
 
+    const usedPointersThisFrame = new Set();
+
     chart.judgeLines.forEach(line => {
         const normX = evalEventList(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
         const normY = evalEventList(line.moveEvents, chartTime, 'startY', 'endY', 0.2);
@@ -2253,28 +2300,40 @@ function renderAndUpdate(dt) {
                     const hitHorizontalWidth = W * 0.09 * noteScale;
 
                     let matchedPointer = null;
+                    let matchedPointerId = null;
                     let matchedHoldStartPointer = null;
+                    let matchedHoldStartPointerId = null;
 
-                    for (const [, ptr] of AppState.pointers) {
-                        if (ptr.isKeyboard) {
-                            matchedPointer = ptr;
-                            matchedHoldStartPointer = ptr;
-                            break;
-                        }
-                        const relX = ptr.x - lineX;
-                        const relY = ptr.y - lineY;
-                        const projX = relX * cosA + relY * sinA;
-                        const projY = -relX * sinA + relY * cosA;
+                    for (const [pointerId, ptr] of AppState.pointers) {
+                        if (usedPointersThisFrame.has(pointerId)) continue;
+                        // 同時刻の重なったノーツを、同じ指が次フレームで二重に取らないようにする。
+                        if (Number.isFinite(ptr.lastMatchedNoteTime) && Math.abs(ptr.lastMatchedNoteTime - note.time) <= 0.002) continue;
 
-                        if (Math.abs(projX - localX) <= hitHorizontalWidth && Math.abs(projY) <= lineTouchVerticalTolerance) {
-                            matchedPointer = ptr;
-                            matchedHoldStartPointer = ptr;
+                        // タップ・ホールド開始は新しく押された指、フリックは動きのある指を優先する。
+                        if ((note.type === 1 || (note.type === 3 && !note.isHolding)) && !ptr.justPressed) continue;
+                        if (note.type === 4 && !(ptr.speed > 4 || ptr.justPressed)) continue;
+
+                        if (!ptr.isKeyboard) {
+                            const relX = ptr.x - lineX;
+                            const relY = ptr.y - lineY;
+                            const projX = relX * cosA + relY * sinA;
+                            const projY = -relX * sinA + relY * cosA;
+
+                            if (Math.abs(projX - localX) > hitHorizontalWidth || Math.abs(projY) > lineTouchVerticalTolerance) continue;
                         }
+
+                        matchedPointer = ptr;
+                        matchedPointerId = pointerId;
+                        matchedHoldStartPointer = ptr;
+                        matchedHoldStartPointerId = pointerId;
+                        break;
                     }
 
                     if (note.type === 1) {
                         if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
                             matchedPointer.justPressed = false;
+                            matchedPointer.lastMatchedNoteTime = note.time;
+                            usedPointersThisFrame.add(matchedPointerId);
                             note.judged = true;
                             const res = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : (absDiff <= JUDGE_WINDOW.GOOD ? 'GOOD' : 'BAD');
                             registerJudgement(res, note, worldNoteX, worldNoteY, totalNotes);
@@ -2287,6 +2346,8 @@ function renderAndUpdate(dt) {
                         }
                     } else if (note.type === 2) {
                         if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
+                            matchedPointer.lastMatchedNoteTime = note.time;
+                            usedPointersThisFrame.add(matchedPointerId);
                             note.judged = true;
                             registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
                             continue;
@@ -2298,6 +2359,8 @@ function renderAndUpdate(dt) {
                         }
                     } else if (note.type === 4) {
                         if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
+                            matchedPointer.lastMatchedNoteTime = note.time;
+                            usedPointersThisFrame.add(matchedPointerId);
                             note.judged = true;
                             registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
                             continue;
@@ -2311,6 +2374,8 @@ function renderAndUpdate(dt) {
                         if (!note.isHolding) {
                             if (matchedHoldStartPointer && matchedHoldStartPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
                                 matchedHoldStartPointer.justPressed = false;
+                                matchedHoldStartPointer.lastMatchedNoteTime = note.time;
+                                usedPointersThisFrame.add(matchedHoldStartPointerId);
                                 note.isHolding = true;
                                 note.holdReleaseTimer = 0;
                                 note.holdTickTimer = 0;
