@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Phigros 譜面シミュレーター (日本語版)</title>
+    <title>Phigros 譜面シミュレーター</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- JSZip -->
@@ -186,7 +186,7 @@
             </div>
             <h2 class="text-2xl sm:text-4xl font-black tracking-wider text-white mb-3">ここにファイルをドロップして楽曲リストに追加</h2>
             <p class="text-cyan-300 text-base sm:text-lg font-medium max-w-xl">
-                複数の <span class="text-amber-300 font-bold">.zip ファイル</span> や楽曲フォルダを一括ドロップ可能！<br>
+                複数の <span class="text-amber-300 font-bold">.zip / .pez ファイル</span> や楽曲フォルダを一括ドロップ可能！<br>
                 譜面 (.json / .pec)・楽曲 (.mp3 / .ogg / .wav)・ジャケット画像 (.png / .jpg) に対応
             </p>
         </div>
@@ -196,7 +196,7 @@
     <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full px-4 sm:px-0"></div>
 
     <!-- 隠しファイル入力 -->
-    <input type="file" id="fileInput" multiple accept=".json,.pec,.mp3,.ogg,.wav,.m4a,.aac,.flac,.png,.jpg,.jpeg,.webp,.zip,.txt,.csv" class="hidden">
+    <input type="file" id="fileInput" multiple accept=".json,.pec,.mp3,.ogg,.wav,.m4a,.aac,.flac,.png,.jpg,.jpeg,.webp,.zip,.pez,.txt,.csv" class="hidden">
     <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
 
     <!-- メインゲームキャンバスコンテナ -->
@@ -500,7 +500,7 @@
 
                 <label class="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-amber-400/30 cursor-pointer hover:border-amber-400/70 transition">
                     <div>
-                        <span class="text-xs font-bold text-amber-300 block">同時押しハイライト（黄色発光）</span>
+                        <span class="text-xs font-bold text-amber-300 block">同時押しハイライト</span>
                         <span class="text-[10px] text-slate-400">同タイミングの複数ノーツを金色フレームで強調</span>
                     </div>
                     <input type="checkbox" id="highlightToggle" checked class="w-4 h-4 accent-amber-400 rounded">
@@ -581,7 +581,7 @@
 
                 <button type="button" id="calTapPad" class="w-full py-7 sm:py-8 rounded-2xl bg-gradient-to-b from-cyan-950/70 to-slate-950 hover:from-cyan-900/70 active:scale-[0.98] border-2 border-cyan-400/70 shadow-[0_0_25px_rgba(0,240,255,0.2)] flex flex-col items-center justify-center transition-transform cursor-pointer">
                     <span class="text-lg sm:text-xl font-black text-white tracking-widest mb-1">リズムに合わせてタップ</span>
-                    <span id="calLastDeltaText" class="font-cyber text-xs font-bold text-cyan-300">タップして計測開始</span>
+                    <span id="calLastDeltaText" class="font-cyber text-xs font-bold text-cyan-300">タップして計測</span>
                 </button>
 
                 <div class="w-full flex flex-wrap items-center justify-center gap-2">
@@ -615,13 +615,13 @@
                     プレイを再開する
                 </button>
                 <button id="retryBtn" class="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-white font-bold text-base tracking-wider transition active:scale-95">
-                    最初からやり直す (リトライ)
+                    リトライ
                 </button>
                 <button class="fullscreenToggleBtn w-full py-3 rounded-xl bg-slate-800/80 hover:bg-slate-700 border border-cyan-500/30 text-cyan-300 font-bold text-sm tracking-wider transition active:scale-95">
                     <span class="fsBtnLabel">全画面表示切替</span>
                 </button>
                 <button id="pauseBackToMenuBtn" class="w-full py-3.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-500/40 text-rose-200 font-bold text-base tracking-wider transition active:scale-95">
-                    選曲画面へ戻る（曲切り替え）
+                    中断
                 </button>
             </div>
         </div>
@@ -686,10 +686,10 @@
 
             <div class="p-5 flex flex-col sm:flex-row gap-3">
                 <button id="resultRetryBtn" class="flex-1 py-3.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-base tracking-wider transition active:scale-95">
-                    もう一度プレイ
+                    リトライ
                 </button>
                 <button id="resultMenuBtn" class="flex-1 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 text-white font-bold text-base tracking-wider transition active:scale-95">
-                    選曲画面へ戻る
+                    戻る
                 </button>
             </div>
         </div>
@@ -714,7 +714,7 @@
                 <div>
                     <h3 class="text-amber-400 font-bold text-base mb-1.5">2. 端末への自動保存について</h3>
                     <p>
-                        端末のストレージ容量を圧迫しないよう、重い音源や画像データはプレイ中のみ保持し、<strong>音ズレオフセット値</strong>と<strong>各楽曲の自己ベスト（スコア・ランク・精度・AP/FC状態）</strong>だけを端末に自動保存します。次回同じ譜面を読み込むと自己ベストが自動復元されます。
+                        一度読み込んだファイルはデータを消去しない限りずっと残ります。
                     </p>
                 </div>
                 <div>
@@ -1677,7 +1677,7 @@ async function handleDroppedOrSelectedFiles(fileList) {
 
     for (const file of Array.from(fileList)) {
         const lower = file.name.toLowerCase();
-        if (lower.endsWith('.zip')) {
+        if (lower.endsWith('.zip') || lower.endsWith('.pez')) {
             zipFiles.push(file);
         } else if (file.webkitRelativePath && file.webkitRelativePath.includes('/')) {
             const parts = file.webkitRelativePath.split('/');
@@ -1714,7 +1714,7 @@ async function handleDroppedOrSelectedFiles(fileList) {
                 subGroups.get(subKey).push(new File([blob], baseName, { type: blob.type }));
             }
 
-            const zipBaseName = zFile.name.replace(/\.zip$/i, '');
+            const zipBaseName = zFile.name.replace(/\.(zip|pez)$/i, '');
             for (const [subKey, files] of subGroups.entries()) {
                 const fallbackName = subKey === '__root__' ? zipBaseName : subKey.split('/').pop();
                 const entry = await createSongEntryFromFileGroup(files, fallbackName);
