@@ -2335,7 +2335,7 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr) {
     // 通常領域を追加し、subtract領域で順にくり抜く。
     // active[0]だけを見ると、JSON上の並び順によって極性が誤る。
     if (active.some(area => Boolean(area.isSubtract))) {
-        mctx.fillStyle = '#fff';
+        mctx.fillStyle = '#A80040';
         mctx.fillRect(0, 0, pixelW, pixelH);
     }
     mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
