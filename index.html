@@ -2398,18 +2398,18 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr, buildOnly = false) {
     mctx.setTransform(1, 0, 0, 1, 0, 0);
     mctx.globalCompositeOperation = 'source-over';
     mctx.clearRect(0, 0, pixelW, pixelH);
-
-    // 合成の初期状態は先頭の有効領域の操作に合わせる。
-    // 後続にSubtract領域があるという理由だけで画面全体を塗ると、
-    // 通常領域が広い譜面でマスクの内外が逆転してしまう。
-    // 先頭がSubtractの場合だけ、全画面を基準にして穴を開ける。
-    if (Boolean(active[0].isSubtract)) {
-        mctx.fillStyle = '#A80040';
-        mctx.fillRect(0, 0, pixelW, pixelH);
-    }
     mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    for (const area of active) {
+    // Phira仕様 (Union XOR):
+    // 1. まず通常領域 (!isSubtract) を和集合 (source-over) として描画し、
+    // 2. その後、減算領域 (isSubtract) を XOR 合成 (xor) で適用する。
+    // これにより配列順や最初・最後の単体出現時に全画面が反転するのを防ぐ。
+    const orderedAreas = [
+        ...active.filter(a => !a.isSubtract),
+        ...active.filter(a => Boolean(a.isSubtract))
+    ];
+
+    for (const area of orderedAreas) {
         const tr = area.topRightPercentage || {};
         const bl = area.bottomLeftPercentage || {};
         const left = safeNum(bl.x, 0) * W;
@@ -2439,8 +2439,6 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr, buildOnly = false) {
         const rotateAnchor = rotateEvent && rotateEvent.anchor ? rotateEvent.anchor : { x: 0.5, y: 0.5 };
         const scaleAnchor = scaleEvent && scaleEvent.anchor ? scaleEvent.anchor : { x: 0.5, y: 0.5 };
 
-        // moveEvents.endPosition は移動量ではなく、BlockArea中心の目標座標。
-        // 元の矩形中心との差分だけ平行移動する（座標原点は左下）。
         const baseCenterX = (safeNum(tr.x, 1) + safeNum(bl.x, 0)) / 2;
         const baseCenterY = (safeNum(tr.y, 1) + safeNum(bl.y, 0)) / 2;
         const moveDeltaX = safeNum(move.x, baseCenterX) - baseCenterX;
@@ -2459,16 +2457,15 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr, buildOnly = false) {
         mctx.scale(safeNum(scale.x, 1), safeNum(scale.y, 1));
         mctx.translate(-sax, -say);
 
-        mctx.globalCompositeOperation = area.isSubtract ? 'destination-out' : 'source-over';
+        // 通常領域は和集合(source-over)、減算領域はXOR(xor)で合成
+        mctx.globalCompositeOperation = area.isSubtract ? 'xor' : 'source-over';
         mctx.fillStyle = '#fff';
         mctx.fillRect(left, top, width, height);
         mctx.restore();
     }
 
-    // 判定処理より前にマスクだけを構築する呼び出しでは、ここで終了する。
     if (buildOnly) return true;
 
-    // 画面全体の描画結果にマスクを適用。HUDはこの後に描画する。
     if (blockAreaSceneCanvas.width !== pixelW || blockAreaSceneCanvas.height !== pixelH) {
         blockAreaSceneCanvas.width = pixelW;
         blockAreaSceneCanvas.height = pixelH;
@@ -2476,7 +2473,6 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr, buildOnly = false) {
     blockAreaSceneCtx.setTransform(1, 0, 0, 1, 0, 0);
     blockAreaSceneCtx.clearRect(0, 0, pixelW, pixelH);
     blockAreaSceneCtx.drawImage(canvas, 0, 0);
-    // BlockArea領域そのものを隠す（マスクの内外を反転）。
     blockAreaSceneCtx.globalCompositeOperation = 'destination-out';
     blockAreaSceneCtx.drawImage(blockAreaMaskCanvas, 0, 0);
     blockAreaSceneCtx.globalCompositeOperation = 'source-over';
@@ -2487,7 +2483,6 @@ function drawBlockAreaMask(chart, chartTime, W, H, dpr, buildOnly = false) {
     ctx.drawImage(blockAreaSceneCanvas, 0, 0);
     ctx.restore();
 
-    // ノーツ・背景を隠した領域にノイズを重ねる。ノイズ模様は停止せず時間更新する。
     drawBlockAreaNoise(chartTime, W, H, dpr, AppState.isPaused ? 0 : (window.__lastBlockAreaDt || 0));
     return true;
 }
