@@ -1210,12 +1210,26 @@ class ChartParser {
             if (!line || !Array.isArray(line.notes)) return;
             line.notes.forEach(n => {
                 n.isHighlight = false;
+                n.nearNotes = [];
                 if (Number.isFinite(n.time)) allNotes.push(n);
             });
+
+            // sim-phiと同様、Tap/HoldとFlickをそれぞれ0.01秒以内で関連付ける。
+            const notes = line.notes;
+            for (let i = 0; i < notes.length; i++) {
+                const note = notes[i];
+                const family = note.type === 4 ? 'flick' : ((note.type === 1 || note.type === 3) ? 'tapHold' : '');
+                if (!family) continue;
+                for (let j = i + 1; j < notes.length; j++) {
+                    const next = notes[j];
+                    if (next.time - note.time > 0.01) break;
+                    const nextFamily = next.type === 4 ? 'flick' : ((next.type === 1 || next.type === 3) ? 'tapHold' : '');
+                    if (family === nextFamily) note.nearNotes.push(next);
+                }
+            }
         });
 
         allNotes.sort((a, b) => a.time - b.time);
-
         for (let i = 1; i < allNotes.length; i++) {
             if (Math.abs(allNotes[i].time - allNotes[i - 1].time) <= 0.002) {
                 allNotes[i].isHighlight = true;
@@ -2101,7 +2115,28 @@ function evalEventList(events, time, propStart, propEnd, defaultVal) {
     return safeNum(events[events.length - 1][propEnd], defaultVal);
 }
 
-const JUDGE_WINDOW = { PERFECT: 0.080, GOOD: 0.160, BAD: 0.200 };
+const JUDGE_WINDOW = { MISS: 0.160, BAD: 0.160, PERFECT_EARLY: 0.040, PERFECT_LATE: -0.080, PERFECT_CENTER: -0.040, GOOD_EARLY: 0.080 };
+
+// sim-phi方式：判定線方向のズレと、判定線からの距離を分けて測る。
+function getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, noteLocalX, noteWorldX, noteWorldY) {
+    if (ptr.isKeyboard) return { offset: 0, distance: 0 };
+    const dx = ptr.x - noteWorldX;
+    const dy = ptr.y - noteWorldY;
+    const along = dx * cosA + dy * sinA;
+    const perpendicular = -dx * sinA + dy * cosA;
+    return {
+        offset: Math.abs(along),
+        distance: Math.abs(along) + Math.abs(perpendicular)
+    };
+}
+
+function getSimPhiTapResult(deltaTime) {
+    if (deltaTime > JUDGE_WINDOW.GOOD_EARLY) return 'GOOD';
+    if (deltaTime > JUDGE_WINDOW.PERFECT_EARLY) return 'PERFECT';
+    if (deltaTime > JUDGE_WINDOW.PERFECT_CENTER) return 'PERFECT';
+    if (deltaTime > JUDGE_WINDOW.PERFECT_LATE) return 'PERFECT';
+    return 'GOOD';
+}
 
 function registerJudgement(result, note, worldX, worldY, totalNotes) {
     if (result === 'PERFECT') {
@@ -2221,6 +2256,7 @@ function renderAndUpdate(dt) {
     const isHighlightEnabled = Boolean(AppState.settings.multiHighlight);
 
     const usedPointersThisFrame = new Set();
+    for (const [, ptr] of AppState.pointers) ptr.preventBad = false;
 
     chart.judgeLines.forEach(line => {
         const normX = evalEventList(line.moveEvents, chartTime, 'startX', 'endX', 0.5);
@@ -2249,7 +2285,6 @@ function renderAndUpdate(dt) {
             ctx.lineWidth = Math.max(2.5, H * 0.005);
             ctx.shadowColor = ctx.strokeStyle;
             ctx.shadowBlur = 10;
-
             const lineLen = W * 2.4;
             ctx.beginPath();
             ctx.moveTo(-lineLen, 0);
@@ -2259,6 +2294,21 @@ function renderAndUpdate(dt) {
         }
 
         const dirSign = -1;
+        const hitWidth = W * 0.118125 * noteScale;
+
+        // sim-phiのpreventBad相当：Drag/Flickの直前入力をTapの早押しBADにしない。
+        for (const note of line.notes) {
+            if (note.judged || (note.type !== 2 && note.type !== 4) || note.time <= chartTime) continue;
+            const localX = note.positionX * W;
+            const noteWorldX = lineX + localX * cosA;
+            const noteWorldY = lineY + localX * sinA;
+            for (const [, ptr] of AppState.pointers) {
+                if (!ptr.justPressed) continue;
+                const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, localX, noteWorldX, noteWorldY);
+                if (metrics.offset <= hitWidth) ptr.preventBad = true;
+            }
+        }
+
         for (let i = 0; i < line.notes.length; i++) {
             const note = line.notes[i];
             if (note.judged) continue;
@@ -2294,122 +2344,166 @@ function renderAndUpdate(dt) {
                             }
                         }
                     }
-                } else {
-                    const absDiff = Math.abs(timeDiff);
-                    const lineTouchVerticalTolerance = H * 1.5;
-                    const hitHorizontalWidth = W * 0.09 * noteScale;
-
-                    let matchedPointer = null;
-                    let matchedPointerId = null;
-                    let matchedHoldStartPointer = null;
-                    let matchedHoldStartPointerId = null;
-
-                    for (const [pointerId, ptr] of AppState.pointers) {
-                        if (usedPointersThisFrame.has(pointerId)) continue;
-                        // 同時刻の重なったノーツを、同じ指が次フレームで二重に取らないようにする。
-                        if (Number.isFinite(ptr.lastMatchedNoteTime) && Math.abs(ptr.lastMatchedNoteTime - note.time) <= 0.002) continue;
-
-                        // タップ・ホールド開始は新しく押された指、フリックは動きのある指を優先する。
-                        if ((note.type === 1 || (note.type === 3 && !note.isHolding)) && !ptr.justPressed) continue;
-                        if (note.type === 4 && !(ptr.speed > 4 || ptr.justPressed)) continue;
-
-                        if (!ptr.isKeyboard) {
-                            const relX = ptr.x - lineX;
-                            const relY = ptr.y - lineY;
-                            const projX = relX * cosA + relY * sinA;
-                            const projY = -relX * sinA + relY * cosA;
-
-                            if (Math.abs(projX - localX) > hitHorizontalWidth || Math.abs(projY) > lineTouchVerticalTolerance) continue;
+                } else if (note.type === 2) {
+                    // Drag：押し続けている入力が判定線上にあれば接触状態にし、通過後に確定。
+                    if (timeDiff > 0) {
+                        for (const [, ptr] of AppState.pointers) {
+                            if (!ptr.justPressed) continue;
+                            const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, localX, worldNoteX, worldNoteY);
+                            if (metrics.offset <= hitWidth) ptr.preventBad = true;
                         }
-
-                        matchedPointer = ptr;
-                        matchedPointerId = pointerId;
-                        matchedHoldStartPointer = ptr;
-                        matchedHoldStartPointerId = pointerId;
-                        break;
                     }
-
-                    if (note.type === 1) {
-                        if (matchedPointer && matchedPointer.justPressed && absDiff <= JUDGE_WINDOW.BAD) {
-                            matchedPointer.justPressed = false;
-                            matchedPointer.lastMatchedNoteTime = note.time;
-                            usedPointersThisFrame.add(matchedPointerId);
+                    if (!note.dragTouched) {
+                        for (const [, ptr] of AppState.pointers) {
+                            const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, localX, worldNoteX, worldNoteY);
+                            if (metrics.offset <= hitWidth && timeDiff <= 0.16 && timeDiff >= -0.16) {
+                                note.dragTouched = true;
+                                break;
+                            }
+                        }
+                    } else if (timeDiff < 0) {
+                        note.judged = true;
+                        registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
+                        continue;
+                    }
+                    if (timeDiff < -JUDGE_WINDOW.MISS && !note.dragTouched) {
+                        note.judged = true;
+                        registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
+                        continue;
+                    }
+                } else if (note.type === 4) {
+                    // Flick：同じFlickイベントは一度だけ使い、0.01秒以内の近接ノーツから最短距離を選ぶ。
+                    if (!note.flickTouched) {
+                        for (const [pointerId, ptr] of AppState.pointers) {
+                            if (ptr.flicked || !(ptr.flicking || ptr.justPressed)) continue;
+                            const candidates = [note, ...(note.nearNotes || [])];
+                            let bestNote = null;
+                            let bestMetrics = null;
+                            for (const candidate of candidates) {
+                                if (candidate.judged || candidate.flickTouched) continue;
+                                const candidateDiff = candidate.time - chartTime;
+                                if (candidateDiff > 0.16) continue;
+                                const candidateX = candidate.positionX * W;
+                                const candidateWorldX = lineX + candidateX * cosA;
+                                const candidateWorldY = lineY + candidateX * sinA;
+                                const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, candidateX, candidateWorldX, candidateWorldY);
+                                if (metrics.offset > hitWidth) continue;
+                                if (!bestMetrics || metrics.distance < bestMetrics.distance) {
+                                    bestNote = candidate;
+                                    bestMetrics = metrics;
+                                }
+                            }
+                            if (bestNote) {
+                                bestNote.flickTouched = true;
+                                ptr.flicked = true;
+                                usedPointersThisFrame.add(pointerId);
+                                if (bestNote === note) break;
+                            }
+                        }
+                    }
+                    if (note.flickTouched && timeDiff < 0) {
+                        note.judged = true;
+                        registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
+                        continue;
+                    }
+                    if (timeDiff < -JUDGE_WINDOW.MISS && !note.flickTouched) {
+                        note.judged = true;
+                        registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
+                        continue;
+                    }
+                } else if (note.type === 1 || note.type === 3) {
+                    if (note.type === 3 && note.isHolding) {
+                        // Hold終端はsim-phi同様、終端直前の0.2秒区間で確定する。
+                        if (note.endTime - chartTime < 0.2) {
                             note.judged = true;
-                            const res = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : (absDiff <= JUDGE_WINDOW.GOOD ? 'GOOD' : 'BAD');
-                            registerJudgement(res, note, worldNoteX, worldNoteY, totalNotes);
+                            registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY, totalNotes);
                             continue;
                         }
-                        if (timeDiff < -JUDGE_WINDOW.BAD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
-                            continue;
+                        // Hold継続：判定線上にアクティブ入力があるかを毎フレーム確認。
+                        let holdStillPressed = false;
+                        for (const [, ptr] of AppState.pointers) {
+                            const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, localX, worldNoteX, worldNoteY);
+                            if (metrics.offset <= hitWidth) { holdStillPressed = true; break; }
                         }
-                    } else if (note.type === 2) {
-                        if (matchedPointer && absDiff <= JUDGE_WINDOW.GOOD) {
-                            matchedPointer.lastMatchedNoteTime = note.time;
-                            usedPointersThisFrame.add(matchedPointerId);
-                            note.judged = true;
-                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
-                            continue;
-                        }
-                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
-                            continue;
-                        }
-                    } else if (note.type === 4) {
-                        if (matchedPointer && (matchedPointer.speed > 4 || matchedPointer.justPressed) && absDiff <= JUDGE_WINDOW.GOOD) {
-                            matchedPointer.lastMatchedNoteTime = note.time;
-                            usedPointersThisFrame.add(matchedPointerId);
-                            note.judged = true;
-                            registerJudgement('PERFECT', note, worldNoteX, worldNoteY, totalNotes);
-                            continue;
-                        }
-                        if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                            note.judged = true;
-                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
-                            continue;
-                        }
-                    } else if (note.type === 3) {
-                        if (!note.isHolding) {
-                            if (matchedHoldStartPointer && matchedHoldStartPointer.justPressed && absDiff <= JUDGE_WINDOW.GOOD) {
-                                matchedHoldStartPointer.justPressed = false;
-                                matchedHoldStartPointer.lastMatchedNoteTime = note.time;
-                                usedPointersThisFrame.add(matchedHoldStartPointerId);
-                                note.isHolding = true;
-                                note.holdReleaseTimer = 0;
+                        if (holdStillPressed) {
+                            note.holdReleaseTimer = 0;
+                            note.holdTickTimer += dt;
+                            if (note.holdTickTimer >= 0.12) {
                                 note.holdTickTimer = 0;
-                                note.hitResult = absDiff <= JUDGE_WINDOW.PERFECT ? 'PERFECT' : 'GOOD';
                                 spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
-                            } else if (timeDiff < -JUDGE_WINDOW.GOOD) {
-                                note.judged = true;
-                                registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
-                                continue;
                             }
                         } else {
-                            const remainingToEnd = note.endTime - chartTime;
-                            if (remainingToEnd <= 0.20) {
-                                note.judged = true;
-                                registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY, totalNotes);
-                                continue;
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
+                            continue;
+                        }
+                        if (note.endTime - chartTime <= 0) {
+                            note.judged = true;
+                            registerJudgement(note.hitResult || 'PERFECT', note, worldNoteX, worldNoteY, totalNotes);
+                            continue;
+                        }
+                    } else {
+                        // Tap/Hold head：同じ入力イベントは一度だけ消費し、近接候補の最短距離を採用。
+                        for (const [pointerId, ptr] of AppState.pointers) {
+                            if (!ptr.justPressed || usedPointersThisFrame.has(pointerId)) continue;
+                            const candidates = [note, ...(note.nearNotes || [])];
+                            let matchedNote = null;
+                            let matchedMetrics = null;
+                            let matchedDelta = 0;
+                            for (const candidate of candidates) {
+                                if (candidate.judged || candidate.isHolding || (candidate.type !== 1 && candidate.type !== 3)) continue;
+                                const candidateDiff = candidate.time - chartTime;
+                                if (candidateDiff > 0.2) continue;
+                                const candidateX = candidate.positionX * W;
+                                const candidateWorldX = lineX + candidateX * cosA;
+                                const candidateWorldY = lineY + candidateX * sinA;
+                                const metrics = getPointerNoteMetrics(ptr, lineX, lineY, cosA, sinA, candidateX, candidateWorldX, candidateWorldY);
+                                if (metrics.offset > hitWidth) continue;
+                                if (!matchedMetrics || metrics.distance < matchedMetrics.distance) {
+                                    matchedNote = candidate;
+                                    matchedMetrics = metrics;
+                                    matchedDelta = candidateDiff;
+                                }
                             }
 
-                            const hasAnyActiveTouch = AppState.pointers.size > 0;
-                            if (hasAnyActiveTouch) {
-                                note.holdReleaseTimer = 0;
-                                note.holdTickTimer += dt;
-                                if (note.holdTickTimer >= 0.12) {
-                                    note.holdTickTimer = 0;
-                                    spawnHitEffect(worldNoteX, worldNoteY, '#ffd700');
-                                }
+                            if (!matchedNote) continue;
+                            if (matchedDelta > JUDGE_WINDOW.BAD && ptr.preventBad) continue;
+
+                            ptr.justPressed = false;
+                            usedPointersThisFrame.add(pointerId);
+                            const hitX = lineX + matchedNote.positionX * W * cosA;
+                            const hitY = lineY + matchedNote.positionX * W * sinA;
+                            if (matchedDelta > JUDGE_WINDOW.BAD) {
+                                matchedNote.judged = true;
+                                registerJudgement('BAD', matchedNote, hitX, hitY, totalNotes);
                             } else {
-                                note.holdReleaseTimer += dt;
-                                if (note.holdReleaseTimer > 0.18) {
-                                    note.judged = true;
-                                    registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
-                                    continue;
+                                const result = getSimPhiTapResult(matchedDelta);
+                                if (matchedNote.type === 1) {
+                                    matchedNote.judged = true;
+                                    registerJudgement(result, matchedNote, hitX, hitY, totalNotes);
+                                } else {
+                                    matchedNote.isHolding = true;
+                                    matchedNote.holdReleaseTimer = 0;
+                                    matchedNote.holdTickTimer = 0;
+                                    matchedNote.hitResult = result;
+                                    matchedNote.holdTapTime = performance.now();
+                                    matchedNote.holdBroken = false;
+                                    spawnHitEffect(hitX, hitY, '#ffd700');
                                 }
                             }
+                            // 近接ノーツ側を選んだ場合は次の指イベントも同じグループに照合する。
+                            if (matchedNote === note) break;
+                        }
+
+                        if (note.type === 1 && timeDiff < -JUDGE_WINDOW.MISS) {
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
+                            continue;
+                        }
+                        if (note.type === 3 && !note.isHolding && timeDiff < -JUDGE_WINDOW.MISS) {
+                            note.judged = true;
+                            registerJudgement('MISS', note, worldNoteX, worldNoteY, totalNotes);
+                            continue;
                         }
                     }
                 }
@@ -2629,6 +2723,11 @@ async function startGame() {
             n.holdTickTimer = 0;
             n.holdReleaseTimer = 0;
             n.hitResult = null;
+            n.dragTouched = false;
+            n.flickTouched = false;
+            n.holdTapTime = 0;
+            n.holdBroken = false;
+            n.holdStatus = 0;
         });
     });
 
@@ -2764,7 +2863,7 @@ canvas.addEventListener('touchstart', (e) => {
     soundEngine.init();
     for (const touch of Array.from(e.changedTouches)) {
         const pos = getCanvasCoords(touch.clientX, touch.clientY);
-        AppState.pointers.set(touch.identifier, { x: pos.x, y: pos.y, justPressed: true, speed: 0 });
+        AppState.pointers.set(touch.identifier, { x: pos.x, y: pos.y, justPressed: true, speed: 0, isKeyboard: false, lastDeltaX: 0, lastDeltaY: 0, nowDeltaX: 0, nowDeltaY: 0, currentTime: performance.now(), flicking: false, flicked: false });
     }
 }, { passive: false });
 
@@ -2774,7 +2873,20 @@ canvas.addEventListener('touchmove', (e) => {
         const ptr = AppState.pointers.get(touch.identifier);
         if (ptr) {
             const pos = getCanvasCoords(touch.clientX, touch.clientY);
-            ptr.speed = Math.hypot(pos.x - ptr.x, pos.y - ptr.y);
+            const dx = pos.x - ptr.x;
+            const dy = pos.y - ptr.y;
+            const now = performance.now();
+            const deltaMs = Math.max(1, now - (ptr.currentTime || now));
+            ptr.lastDeltaX = ptr.nowDeltaX || 0;
+            ptr.lastDeltaY = ptr.nowDeltaY || 0;
+            ptr.nowDeltaX = dx;
+            ptr.nowDeltaY = dy;
+            ptr.speed = Math.hypot(dx, dy) / deltaMs;
+            const lastLength = Math.hypot(ptr.lastDeltaX, ptr.lastDeltaY);
+            const flickSpeed = lastLength > 0 ? (dx * ptr.lastDeltaX + dy * ptr.lastDeltaY) / lastLength / deltaMs : 0;
+            if (ptr.flicking && flickSpeed < 0.5) { ptr.flicking = false; ptr.flicked = false; }
+            else if (!ptr.flicking && flickSpeed > 1.0) ptr.flicking = true;
+            ptr.currentTime = now;
             ptr.x = pos.x;
             ptr.y = pos.y;
         }
@@ -2793,14 +2905,27 @@ canvas.addEventListener('touchcancel', (e) => {
 canvas.addEventListener('mousedown', (e) => {
     soundEngine.init();
     const pos = getCanvasCoords(e.clientX, e.clientY);
-    AppState.pointers.set('mouse', { x: pos.x, y: pos.y, justPressed: true, speed: 0 });
+    AppState.pointers.set('mouse', { x: pos.x, y: pos.y, justPressed: true, speed: 0, isKeyboard: false, lastDeltaX: 0, lastDeltaY: 0, nowDeltaX: 0, nowDeltaY: 0, currentTime: performance.now(), flicking: false, flicked: false });
 });
 
 window.addEventListener('mousemove', (e) => {
     const ptr = AppState.pointers.get('mouse');
     if (ptr) {
         const pos = getCanvasCoords(e.clientX, e.clientY);
-        ptr.speed = Math.hypot(pos.x - ptr.x, pos.y - ptr.y);
+        const dx = pos.x - ptr.x;
+        const dy = pos.y - ptr.y;
+        const now = performance.now();
+        const deltaMs = Math.max(1, now - (ptr.currentTime || now));
+        ptr.lastDeltaX = ptr.nowDeltaX || 0;
+        ptr.lastDeltaY = ptr.nowDeltaY || 0;
+        ptr.nowDeltaX = dx;
+        ptr.nowDeltaY = dy;
+        ptr.speed = Math.hypot(dx, dy) / deltaMs;
+        const lastLength = Math.hypot(ptr.lastDeltaX, ptr.lastDeltaY);
+        const flickSpeed = lastLength > 0 ? (dx * ptr.lastDeltaX + dy * ptr.lastDeltaY) / lastLength / deltaMs : 0;
+        if (ptr.flicking && flickSpeed < 0.5) { ptr.flicking = false; ptr.flicked = false; }
+        else if (!ptr.flicking && flickSpeed > 1.0) ptr.flicking = true;
+        ptr.currentTime = now;
         ptr.x = pos.x;
         ptr.y = pos.y;
     }
@@ -2824,7 +2949,7 @@ window.addEventListener('keydown', (e) => {
         return;
     }
     if (!AppState.isPlaying || AppState.isPaused) return;
-    AppState.pointers.set(`key_${e.code}`, { x: 0, y: 0, justPressed: true, speed: 10, isKeyboard: true });
+    AppState.pointers.set(`key_${e.code}`, { x: 0, y: 0, justPressed: true, speed: 10, isKeyboard: true, flicking: true, flicked: false, currentTime: performance.now() });
 });
 
 window.addEventListener('keyup', (e) => { AppState.pointers.delete(`key_${e.code}`); });
