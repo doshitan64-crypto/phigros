@@ -1277,6 +1277,9 @@ class ChartParser {
     }
 
     static parseOfficialJSON(jsonObj) {
+        // RPE形式はBPMListを持つため、従来のPhigros公式JSONとは別パーサーへ振り分ける。
+        if (Array.isArray(jsonObj.BPMList)) return this.parseRPEJSON(jsonObj);
+
         const formatVersion = safeNum(jsonObj.formatVersion, 3);
         const offset = safeNum(jsonObj.offset, 0);
         const judgeLines = [];
@@ -1393,6 +1396,247 @@ class ChartParser {
         this.markSimultaneousNotes(judgeLines);
         const blockAreas = Array.isArray(jsonObj.blockAreaList) ? jsonObj.blockAreaList : [];
         return { offset, judgeLines, totalNotes, blockAreas };
+    }
+
+    static parseRPEJSON(jsonObj) {
+        const bpmEvents = (Array.isArray(jsonObj.BPMList) ? jsonObj.BPMList : [])
+            .map(e => ({ beat: beatValue(e.startTime), bpm: Math.max(1, safeNum(e.bpm, 120)) }))
+            .sort((a, b) => a.beat - b.beat);
+        if (bpmEvents.length === 0) bpmEvents.push({ beat: 0, bpm: 120 });
+
+        function beatValue(value) {
+            if (Array.isArray(value)) {
+                const denominator = safeNum(value[2], 1) || 1;
+                return safeNum(value[0], 0) + safeNum(value[1], 0) / denominator;
+            }
+            return safeNum(value, 0);
+        }
+
+        function beatToSec(targetBeat, bpmFactor = 1) {
+            const target = safeNum(targetBeat, 0);
+            let cursor = 0;
+            let currentBpm = bpmEvents[0].bpm;
+            let seconds = 0;
+            for (const event of bpmEvents) {
+                if (event.beat <= cursor) {
+                    currentBpm = event.bpm;
+                    continue;
+                }
+                if (target <= event.beat) {
+                    seconds += (target - cursor) * 60 / currentBpm * bpmFactor;
+                    return seconds;
+                }
+                seconds += (event.beat - cursor) * 60 / currentBpm * bpmFactor;
+                cursor = event.beat;
+                currentBpm = event.bpm;
+            }
+            seconds += (target - cursor) * 60 / currentBpm * bpmFactor;
+            return seconds;
+        }
+
+        function collectLayerEvents(line, key, bpmFactor) {
+            const result = [];
+            const layers = Array.isArray(line.eventLayers) ? line.eventLayers : [];
+            layers.forEach((layer, priority) => {
+                const list = Array.isArray(layer[key]) ? layer[key] : [];
+                list.forEach(event => {
+                    const startTime = beatToSec(beatValue(event.startTime), bpmFactor);
+                    const endTime = beatToSec(beatValue(event.endTime), bpmFactor);
+                    result.push({
+                        startTime: Math.min(startTime, endTime),
+                        endTime: Math.max(startTime, endTime),
+                        start: safeNum(event.start, 0),
+                        end: safeNum(event.end, safeNum(event.start, 0)),
+                        priority,
+                        easingType: safeNum(event.easingType, 1)
+                    });
+                });
+            });
+            return result;
+        }
+
+        function getLayeredEasing(events, time) {
+            if (!events.length) return 1;
+            const active = events.filter(e => time >= e.startTime && time <= e.endTime)
+                .sort((a, b) => b.priority - a.priority || b.startTime - a.startTime);
+            if (active.length) return active[0].easingType || 1;
+            const past = events.filter(e => e.endTime < time)
+                .sort((a, b) => b.priority - a.priority || b.endTime - a.endTime);
+            if (past.length) return past[0].easingType || 1;
+            const future = events.filter(e => e.startTime > time)
+                .sort((a, b) => a.priority - b.priority || a.startTime - b.startTime);
+            return future.length ? (future[0].easingType || 1) : 1;
+        }
+
+        function sampleLayered(events, time, defaultValue) {
+            if (!events.length) return defaultValue;
+            // RPEのイベントレイヤーは同じパラメータ値を加算して合成する。
+            const priorities = Array.from(new Set(events.map(e => e.priority)));
+            let total = 0;
+            for (const priority of priorities) {
+                const layerEvents = events.filter(e => e.priority === priority);
+                const active = layerEvents.filter(e => time >= e.startTime && time <= e.endTime)
+                    .sort((a, b) => b.startTime - a.startTime);
+                if (active.length) {
+                    const e = active[0];
+                    const duration = e.endTime - e.startTime;
+                    if (duration <= 0.000001) total += e.end;
+                    else {
+                        const t = Math.max(0, Math.min(1, (time - e.startTime) / duration));
+                        total += e.start + (e.end - e.start) * t;
+                    }
+                    continue;
+                }
+                const past = layerEvents.filter(e => e.endTime < time).sort((a, b) => b.endTime - a.endTime);
+                if (past.length) total += past[0].end;
+                else {
+                    const future = layerEvents.filter(e => e.startTime > time).sort((a, b) => a.startTime - b.startTime);
+                    if (future.length) total += future[0].start;
+                }
+            }
+            return total;
+        }
+
+        function makeSegments(events, defaultValue, scale = 1) {
+            if (!events.length) {
+                return [{ startTime: 0, endTime: 999999, start: defaultValue, end: defaultValue }];
+            }
+            const boundaries = Array.from(new Set([
+                0,
+                ...events.flatMap(e => [e.startTime, e.endTime]),
+                999999
+            ])).filter(Number.isFinite).sort((a, b) => a - b);
+            const segments = [];
+            for (let i = 0; i < boundaries.length - 1; i++) {
+                const startTime = boundaries[i];
+                const endTime = boundaries[i + 1];
+                if (endTime <= startTime) continue;
+                segments.push({
+                    startTime,
+                    endTime,
+                    start: sampleLayered(events, startTime, defaultValue) * scale,
+                    end: sampleLayered(events, endTime, defaultValue) * scale,
+                    easingType: getLayeredEasing(events, (startTime + endTime) / 2)
+                });
+            }
+            return segments.length ? segments : [{ startTime: 0, endTime: 999999, start: defaultValue, end: defaultValue }];
+        }
+
+        function makeMoveSegments(xEvents, yEvents) {
+            const all = [...xEvents, ...yEvents];
+            if (!all.length) {
+                return [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
+            }
+            const boundaries = Array.from(new Set([
+                0,
+                ...all.flatMap(e => [e.startTime, e.endTime]),
+                999999
+            ])).filter(Number.isFinite).sort((a, b) => a - b);
+            const xAt = t => 0.5 + sampleLayered(xEvents, t, 0) / 1350;
+            const yAt = t => 0.5 + sampleLayered(yEvents, t, 0) / 900;
+            const segments = [];
+            for (let i = 0; i < boundaries.length - 1; i++) {
+                const startTime = boundaries[i];
+                const endTime = boundaries[i + 1];
+                if (endTime <= startTime) continue;
+                const middle = (startTime + endTime) / 2;
+                segments.push({
+                    startTime, endTime,
+                    startX: xAt(startTime), endX: xAt(endTime),
+                    startY: yAt(startTime), endY: yAt(endTime),
+                    easingTypeX: getLayeredEasing(xEvents, middle),
+                    easingTypeY: getLayeredEasing(yEvents, middle)
+                });
+            }
+            return segments.length ? segments : [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
+        }
+
+        const judgeLines = [];
+        let totalNotes = 0;
+        (Array.isArray(jsonObj.judgeLineList) ? jsonObj.judgeLineList : []).forEach((rawLine, lineIdx) => {
+            const bpmFactor = Math.max(0.0001, safeNum(rawLine.bpmfactor, 1));
+            const xEvents = collectLayerEvents(rawLine, 'moveXEvents', bpmFactor);
+            const yEvents = collectLayerEvents(rawLine, 'moveYEvents', bpmFactor);
+            const rotateRaw = collectLayerEvents(rawLine, 'rotateEvents', bpmFactor);
+            const alphaRaw = collectLayerEvents(rawLine, 'alphaEvents', bpmFactor);
+            const speedRaw = collectLayerEvents(rawLine, 'speedEvents', bpmFactor);
+
+            const moveEvents = makeMoveSegments(xEvents, yEvents);
+            const rotateEvents = makeSegments(rotateRaw, 0);
+            const alphaEvents = makeSegments(alphaRaw, 255, 1 / 255);
+
+            // RPEの速度は10が標準。イベントのstart/endを速度倍率へ変換する。
+            let speedEvents;
+            if (speedRaw.length) {
+                const boundaries = Array.from(new Set([
+                    0,
+                    ...speedRaw.flatMap(e => [e.startTime, e.endTime]),
+                    999999
+                ])).filter(Number.isFinite).sort((a, b) => a - b);
+                speedEvents = [];
+                let floorPosition = 0;
+                for (let i = 0; i < boundaries.length - 1; i++) {
+                    const startTime = boundaries[i];
+                    const endTime = boundaries[i + 1];
+                    if (endTime <= startTime) continue;
+                    const startValue = sampleLayered(speedRaw, startTime, 0) / 10;
+                    const endValue = sampleLayered(speedRaw, endTime, 0) / 10;
+                    const event = { startTime, endTime, value: startValue, endValue, floorPosition };
+                    speedEvents.push(event);
+                    floorPosition += (endTime - startTime) * (startValue + endValue) / 2;
+                }
+            } else {
+                speedEvents = [{ startTime: 0, endTime: 999999, value: 1, endValue: 1, floorPosition: 0 }];
+            }
+
+            const notes = [];
+            (Array.isArray(rawLine.notes) ? rawLine.notes : []).forEach((rawNote, noteIdx) => {
+                if (safeNum(rawNote.isFake, 0) === 1) return;
+                const rpeType = safeNum(rawNote.type, 1);
+                // RPE: 1 Tap / 2 Hold / 3 Flick / 4 Drag
+                // 内部形式: 1 Tap / 2 Drag / 3 Hold / 4 Flick
+                const typeMap = { 1: 1, 2: 3, 3: 4, 4: 2 };
+                const noteType = typeMap[rpeType];
+                if (!noteType) return;
+
+                const hitTime = beatToSec(beatValue(rawNote.startTime), bpmFactor);
+                const endTime = noteType === 3
+                    ? beatToSec(beatValue(rawNote.endTime), bpmFactor)
+                    : hitTime;
+                const floorPos = this.calcFloorPosition(speedEvents, hitTime);
+                const endFloorPos = noteType === 3 ? this.calcFloorPosition(speedEvents, endTime) : floorPos;
+                notes.push({
+                    id: `${lineIdx}_${noteIdx}`,
+                    type: noteType,
+                    time: hitTime,
+                    holdTime: Math.max(0, endTime - hitTime),
+                    endTime: Math.max(hitTime, endTime),
+                    positionX: safeNum(rawNote.positionX, 0) / 1350,
+                    speed: Math.max(0, safeNum(rawNote.speed, 1)),
+                    isHoldLengthSpeed: false,
+                    floorPosition: floorPos,
+                    endFloorPosition: endFloorPos,
+                    isAbove: safeNum(rawNote.above, 1) === 1,
+                    isHighlight: false,
+                    judged: false,
+                    isHolding: false,
+                    holdTickTimer: 0,
+                    holdReleaseTimer: 0,
+                    hitResult: null
+                });
+                totalNotes++;
+            });
+            notes.sort((a, b) => a.time - b.time);
+            judgeLines.push({ id: lineIdx, bpm: bpmEvents[0].bpm / bpmFactor, speedEvents, moveEvents, rotateEvents, alphaEvents, notes });
+        });
+
+        this.markSimultaneousNotes(judgeLines);
+        return {
+            offset: safeNum(jsonObj.META && jsonObj.META.offset, 0) / 1000,
+            judgeLines,
+            totalNotes,
+            blockAreas: Array.isArray(jsonObj.blockAreaList) ? jsonObj.blockAreaList : []
+        };
     }
 
     static parsePEC(pecText) {
@@ -1553,7 +1797,13 @@ class ChartParser {
         for (let i = 0; i < speedEvents.length; i++) {
             const ev = speedEvents[i];
             if (time >= ev.startTime && (time <= ev.endTime || i === speedEvents.length - 1)) {
-                return ev.floorPosition + (time - ev.startTime) * ev.value;
+                const elapsed = time - ev.startTime;
+                const duration = ev.endTime - ev.startTime;
+                if (Number.isFinite(ev.endValue) && duration > 0.000001) {
+                    return ev.floorPosition + ev.value * elapsed
+                        + ((ev.endValue - ev.value) * elapsed * elapsed) / (2 * duration);
+                }
+                return ev.floorPosition + elapsed * ev.value;
             }
         }
         return 0;
@@ -2143,6 +2393,53 @@ function resizeCanvas() {
 
 window.addEventListener('resize', resizeCanvas);
 
+function applyRPEEasing(t, type) {
+    t = Math.max(0, Math.min(1, t));
+    const outBounce = x => {
+        if (x < 1 / 2.75) return 7.5625 * x * x;
+        if (x < 2 / 2.75) return 7.5625 * (x - 1.5 / 2.75) ** 2 + 0.75;
+        if (x < 2.5 / 2.75) return 7.5625 * (x - 2.25 / 2.75) ** 2 + 0.9375;
+        return 7.5625 * (x - 2.625 / 2.75) ** 2 + 0.984375;
+    };
+    switch (safeNum(type, 1)) {
+        case 2: return Math.sin(t * Math.PI / 2);
+        case 3: return 1 - Math.cos(t * Math.PI / 2);
+        case 4: return 1 - (1 - t) ** 2;
+        case 5: return t ** 2;
+        case 6: return -(Math.cos(Math.PI * t) - 1) / 2;
+        case 7: return t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) ** 2) / 2;
+        case 8: return 1 - (1 - t) ** 3;
+        case 9: return t ** 3;
+        case 10: return 1 - (1 - t) ** 4;
+        case 11: return t ** 4;
+        case 12: return t < 0.5 ? 4 * t ** 3 : 1 - ((-2 * t + 2) ** 3) / 2;
+        case 13: return t < 0.5 ? 8 * t ** 4 : 1 - ((-2 * t + 2) ** 4) / 2;
+        case 14: return 1 - (1 - t) ** 5;
+        case 15: return t ** 5;
+        case 16: return t === 1 ? 1 : 1 - 2 ** (-10 * t);
+        case 17: return t === 0 ? 0 : 2 ** (10 * t - 10);
+        case 18: return Math.sqrt(Math.max(0, 1 - (t - 1) ** 2));
+        case 19: return 1 - Math.sqrt(Math.max(0, 1 - t * t));
+        case 20: return 1 + 2.70158 * (t - 1) ** 3 + 1.70158 * (t - 1) ** 2;
+        case 21: return 2.70158 * t ** 3 - 1.70158 * t ** 2;
+        case 22: return t < 0.5
+            ? (1 - Math.sqrt(Math.max(0, 1 - (2 * t) ** 2))) / 2
+            : (Math.sqrt(Math.max(0, 1 - (-2 * t + 2) ** 2)) + 1) / 2;
+        case 23: return t < 0.5
+            ? ((2 * t) ** 2 * (3.5949095 * 2 * t - 2.5949095)) / 2
+            : (((2 * t - 2) ** 2 * (3.5949095 * (2 * t - 2) + 2.5949095) + 2) / 2);
+        case 24: return t === 0 ? 0 : (t === 1 ? 1 : 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI / 3)) + 1);
+        case 25: return t === 0 ? 0 : (t === 1 ? 1 : -(2 ** (10 * t - 10)) * Math.sin((t * 10 - 10.75) * (2 * Math.PI / 3)));
+        case 26: return outBounce(t);
+        case 27: return 1 - outBounce(1 - t);
+        case 28: return t < 0.5 ? (1 - outBounce(1 - 2 * t)) / 2 : (1 + outBounce(2 * t - 1)) / 2;
+        case 29: return t < 0.5
+            ? -(2 ** (20 * t - 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI / 4.5))) / 2
+            : (2 ** (-20 * t + 10) * Math.sin((20 * t - 11.125) * (2 * Math.PI / 4.5))) / 2 + 1;
+        default: return t;
+    }
+}
+
 function evalEventList(events, time, propStart, propEnd, defaultVal) {
     if (!Array.isArray(events) || events.length === 0) return defaultVal;
     if (time <= events[0].startTime) return safeNum(events[0][propStart], defaultVal);
@@ -2155,7 +2452,10 @@ function evalEventList(events, time, propStart, propEnd, defaultVal) {
             const t = Math.max(0, Math.min(1, (time - ev.startTime) / dur));
             const s = safeNum(ev[propStart], defaultVal);
             const e = safeNum(ev[propEnd], defaultVal);
-            return s + (e - s) * t;
+            const easingType = propStart === 'startX' ? ev.easingTypeX
+                : (propStart === 'startY' ? ev.easingTypeY : ev.easingType);
+            const easedT = applyRPEEasing(t, easingType);
+            return s + (e - s) * easedT;
         }
         if (i < events.length - 1 && time > ev.endTime && time < events[i + 1].startTime) {
             return safeNum(events[i][propEnd], defaultVal);
