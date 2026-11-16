@@ -1400,17 +1400,9 @@ class ChartParser {
 
     static parseRPEJSON(jsonObj) {
         const bpmEvents = (Array.isArray(jsonObj.BPMList) ? jsonObj.BPMList : [])
-            .map(e => ({ beat: beatValue(e.startTime), bpm: Math.max(1, safeNum(e.bpm, 120)) }))
+            .map(e => ({ beat: ChartParser.beatValue(e.startTime), bpm: Math.max(1, safeNum(e.bpm, 120)) }))
             .sort((a, b) => a.beat - b.beat);
         if (bpmEvents.length === 0) bpmEvents.push({ beat: 0, bpm: 120 });
-
-        function beatValue(value) {
-            if (Array.isArray(value)) {
-                const denominator = safeNum(value[2], 1) || 1;
-                return safeNum(value[0], 0) + safeNum(value[1], 0) / denominator;
-            }
-            return safeNum(value, 0);
-        }
 
         function beatToSec(targetBeat, bpmFactor = 1) {
             const target = safeNum(targetBeat, 0);
@@ -1423,14 +1415,14 @@ class ChartParser {
                     continue;
                 }
                 if (target <= event.beat) {
-                    seconds += (target - cursor) * 60 / currentBpm * bpmFactor;
+                    seconds += ((target - cursor) * 60 / currentBpm) * bpmFactor;
                     return seconds;
                 }
-                seconds += (event.beat - cursor) * 60 / currentBpm * bpmFactor;
+                seconds += ((event.beat - cursor) * 60 / currentBpm) * bpmFactor;
                 cursor = event.beat;
                 currentBpm = event.bpm;
             }
-            seconds += (target - cursor) * 60 / currentBpm * bpmFactor;
+            seconds += ((target - cursor) * 60 / currentBpm) * bpmFactor;
             return seconds;
         }
 
@@ -1438,10 +1430,11 @@ class ChartParser {
             const result = [];
             const layers = Array.isArray(line.eventLayers) ? line.eventLayers : [];
             layers.forEach((layer, priority) => {
+                if (!layer) return;
                 const list = Array.isArray(layer[key]) ? layer[key] : [];
                 list.forEach(event => {
-                    const startTime = beatToSec(beatValue(event.startTime), bpmFactor);
-                    const endTime = beatToSec(beatValue(event.endTime), bpmFactor);
+                    const startTime = beatToSec(ChartParser.beatValue(event.startTime), bpmFactor);
+                    const endTime = beatToSec(ChartParser.beatValue(event.endTime), bpmFactor);
                     result.push({
                         startTime: Math.min(startTime, endTime),
                         endTime: Math.max(startTime, endTime),
@@ -1470,7 +1463,6 @@ class ChartParser {
 
         function sampleLayered(events, time, defaultValue) {
             if (!events.length) return defaultValue;
-            // RPEのイベントレイヤーは同じパラメータ値を加算して合成する。
             const priorities = Array.from(new Set(events.map(e => e.priority)));
             let total = 0;
             for (const priority of priorities) {
@@ -1483,7 +1475,8 @@ class ChartParser {
                     if (duration <= 0.000001) total += e.end;
                     else {
                         const t = Math.max(0, Math.min(1, (time - e.startTime) / duration));
-                        total += e.start + (e.end - e.start) * t;
+                        const eased = applyRPEEasing(t, e.easingType);
+                        total += e.start + (e.end - e.start) * eased;
                     }
                     continue;
                 }
@@ -1495,6 +1488,37 @@ class ChartParser {
                 }
             }
             return total;
+        }
+
+        function makeMoveSegments(xEvents, yEvents) {
+            const all = [...xEvents, ...yEvents];
+            if (!all.length) {
+                return [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
+            }
+            const boundaries = Array.from(new Set([
+                0,
+                ...all.flatMap(e => [e.startTime, e.endTime]),
+                999999
+            ])).filter(Number.isFinite).sort((a, b) => a - b);
+
+            const xAt = t => 0.5 + sampleLayered(xEvents, t, 0) / 1350;
+            const yAt = t => 0.5 + sampleLayered(yEvents, t, 0) / 900;
+
+            const segments = [];
+            for (let i = 0; i < boundaries.length - 1; i++) {
+                const startTime = boundaries[i];
+                const endTime = boundaries[i + 1];
+                if (endTime <= startTime) continue;
+                const middle = (startTime + endTime) / 2;
+                segments.push({
+                    startTime, endTime,
+                    startX: xAt(startTime), endX: xAt(endTime),
+                    startY: yAt(startTime), endY: yAt(endTime),
+                    easingTypeX: getLayeredEasing(xEvents, middle),
+                    easingTypeY: getLayeredEasing(yEvents, middle)
+                });
+            }
+            return segments.length ? segments : [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
         }
 
         function makeSegments(events, defaultValue, scale = 1) {
@@ -1522,56 +1546,26 @@ class ChartParser {
             return segments.length ? segments : [{ startTime: 0, endTime: 999999, start: defaultValue, end: defaultValue }];
         }
 
-        function makeMoveSegments(xEvents, yEvents) {
-            const all = [...xEvents, ...yEvents];
-            if (!all.length) {
-                return [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
-            }
-            const boundaries = Array.from(new Set([
-                0,
-                ...all.flatMap(e => [e.startTime, e.endTime]),
-                999999
-            ])).filter(Number.isFinite).sort((a, b) => a - b);
-            const xAt = t => 0.5 + sampleLayered(xEvents, t, 0) / 1350;
-            const yAt = t => 0.5 + sampleLayered(yEvents, t, 0) / 900;
-            const segments = [];
-            for (let i = 0; i < boundaries.length - 1; i++) {
-                const startTime = boundaries[i];
-                const endTime = boundaries[i + 1];
-                if (endTime <= startTime) continue;
-                const middle = (startTime + endTime) / 2;
-                segments.push({
-                    startTime, endTime,
-                    startX: xAt(startTime), endX: xAt(endTime),
-                    startY: yAt(startTime), endY: yAt(endTime),
-                    easingTypeX: getLayeredEasing(xEvents, middle),
-                    easingTypeY: getLayeredEasing(yEvents, middle)
-                });
-            }
-            return segments.length ? segments : [{ startTime: 0, endTime: 999999, startX: 0.5, endX: 0.5, startY: 0.5, endY: 0.5 }];
-        }
-
         const judgeLines = [];
         let totalNotes = 0;
+
         (Array.isArray(jsonObj.judgeLineList) ? jsonObj.judgeLineList : []).forEach((rawLine, lineIdx) => {
             const bpmFactor = Math.max(0.0001, safeNum(rawLine.bpmfactor, 1));
             const xEvents = collectLayerEvents(rawLine, 'moveXEvents', bpmFactor);
             const yEvents = collectLayerEvents(rawLine, 'moveYEvents', bpmFactor);
             const rotateRaw = collectLayerEvents(rawLine, 'rotateEvents', bpmFactor);
             const alphaRaw = collectLayerEvents(rawLine, 'alphaEvents', bpmFactor);
-            const speedRaw = collectLayerEvents(rawLine, 'speedEvents', bpmFactor);
 
             const moveEvents = makeMoveSegments(xEvents, yEvents);
             const rotateEvents = makeSegments(rotateRaw, 0);
             const alphaEvents = makeSegments(alphaRaw, 255, 1 / 255);
 
-            // RPEの流速は「beatあたり」の値（標準値10）。
-            // 秒あたりの速度へ変換するときは、その区間のBPMを掛ける。
             const speedBeatEvents = [];
             (Array.isArray(rawLine.eventLayers) ? rawLine.eventLayers : []).forEach((layer, priority) => {
+                if (!layer) return;
                 (Array.isArray(layer.speedEvents) ? layer.speedEvents : []).forEach(event => {
-                    const startBeat = beatValue(event.startTime);
-                    const endBeat = beatValue(event.endTime);
+                    const startBeat = ChartParser.beatValue(event.startTime);
+                    const endBeat = ChartParser.beatValue(event.endTime);
                     speedBeatEvents.push({
                         startBeat: Math.min(startBeat, endBeat),
                         endBeat: Math.max(startBeat, endBeat),
@@ -1581,14 +1575,7 @@ class ChartParser {
                     });
                 });
             });
-            const bpmAtBeat = beat => {
-                let bpm = bpmEvents[0].bpm;
-                for (const event of bpmEvents) {
-                    if (event.beat > beat) break;
-                    bpm = event.bpm;
-                }
-                return bpm;
-            };
+
             const speedAtBeat = beat => {
                 const priorities = Array.from(new Set(speedBeatEvents.map(e => e.priority)));
                 if (!priorities.length) return 10;
@@ -1614,12 +1601,14 @@ class ChartParser {
                 }
                 return total;
             };
+
             const speedBoundaries = Array.from(new Set([
                 0,
                 ...bpmEvents.map(e => e.beat),
                 ...speedBeatEvents.flatMap(e => [e.startBeat, e.endBeat]),
                 999999
             ])).filter(Number.isFinite).sort((a, b) => a - b);
+
             const speedEvents = [];
             let floorPosition = 0;
             for (let i = 0; i < speedBoundaries.length - 1; i++) {
@@ -1628,13 +1617,9 @@ class ChartParser {
                 if (endBeat <= startBeat) continue;
                 const startTime = beatToSec(startBeat, bpmFactor);
                 const endTime = beatToSec(endBeat, bpmFactor);
-                // Lchzh Phigros の速度モデルは Y/s。
-                // RPE の標準速度 10 は 1 Y/s に相当するため、BPMで再度割ったり掛けたりしない。
-                // BPM変化とbpmfactorは beatToSec() が秒へ変換する段階で反映済み。
                 const startValue = speedAtBeat(startBeat) / 10;
                 const endValue = speedAtBeat(endBeat) / 10;
                 speedEvents.push({ startTime, endTime, value: startValue, endValue: endValue, floorPosition });
-                // 速度はイベント内で線形変化するため、秒基準で台形積分して累積Y位置を求める。
                 floorPosition += (endTime - startTime) * (startValue + endValue) / 2;
             }
             if (!speedEvents.length) speedEvents.push({ startTime: 0, endTime: 999999, value: 1, endValue: 1, floorPosition: 0 });
@@ -1643,20 +1628,19 @@ class ChartParser {
             (Array.isArray(rawLine.notes) ? rawLine.notes : []).forEach((rawNote, noteIdx) => {
                 if (safeNum(rawNote.isFake, 0) === 1) return;
                 const rpeType = safeNum(rawNote.type, 1);
-                // RPE: 1 Tap / 2 Hold / 3 Flick / 4 Drag
-                // 内部形式: 1 Tap / 2 Drag / 3 Hold / 4 Flick
                 const typeMap = { 1: 1, 2: 3, 3: 4, 4: 2 };
                 const noteType = typeMap[rpeType];
                 if (!noteType) return;
 
-                const hitTime = beatToSec(beatValue(rawNote.startTime), bpmFactor);
+                const hitTime = beatToSec(ChartParser.beatValue(rawNote.startTime), bpmFactor);
                 const endTime = noteType === 3
-                    ? beatToSec(beatValue(rawNote.endTime), bpmFactor)
+                    ? beatToSec(ChartParser.beatValue(rawNote.endTime), bpmFactor)
                     : hitTime;
                 const noteSpeed = Math.max(0, safeNum(rawNote.speed, 1));
                 const noteYOffset = safeNum(rawNote.yOffset, 0) * noteSpeed;
-                const floorPos = this.calcFloorPosition(speedEvents, hitTime) + noteYOffset;
-                const endFloorPos = noteType === 3 ? this.calcFloorPosition(speedEvents, endTime) + noteYOffset : floorPos;
+                const floorPos = ChartParser.calcFloorPosition(speedEvents, hitTime) + noteYOffset;
+                const endFloorPos = noteType === 3 ? ChartParser.calcFloorPosition(speedEvents, endTime) + noteYOffset : floorPos;
+
                 notes.push({
                     id: `${lineIdx}_${noteIdx}`,
                     type: noteType,
@@ -1679,16 +1663,33 @@ class ChartParser {
                 totalNotes++;
             });
             notes.sort((a, b) => a.time - b.time);
-            judgeLines.push({ id: lineIdx, bpm: bpmEvents[0].bpm / bpmFactor, speedEvents, moveEvents, rotateEvents, alphaEvents, rpeMotion: { xEvents, yEvents, rotateEvents: rotateRaw, alphaEvents: alphaRaw }, notes });
+            judgeLines.push({
+                id: lineIdx,
+                bpm: bpmEvents[0].bpm / bpmFactor,
+                speedEvents,
+                moveEvents,
+                rotateEvents,
+                alphaEvents,
+                rpeMotion: { xEvents, yEvents, rotateEvents: rotateRaw, alphaEvents: alphaRaw },
+                notes
+            });
         });
 
-        this.markSimultaneousNotes(judgeLines);
+        ChartParser.markSimultaneousNotes(judgeLines);
         return {
             offset: safeNum(jsonObj.META && jsonObj.META.offset, 0) / 1000,
             judgeLines,
             totalNotes,
             blockAreas: Array.isArray(jsonObj.blockAreaList) ? jsonObj.blockAreaList : []
         };
+    }
+
+    static beatValue(value) {
+        if (Array.isArray(value)) {
+            const denominator = safeNum(value[2], 1) || 1;
+            return safeNum(value[0], 0) + safeNum(value[1], 0) / denominator;
+        }
+        return safeNum(value, 0);
     }
 
     static parsePEC(pecText) {
