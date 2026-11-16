@@ -1626,16 +1626,18 @@ class ChartParser {
                 const startBeat = speedBoundaries[i];
                 const endBeat = speedBoundaries[i + 1];
                 if (endBeat <= startBeat) continue;
-                const bpm = bpmAtBeat((startBeat + endBeat) / 2);
-                const secondsPerBeat = 60 / (bpm * bpmFactor);
                 const startTime = beatToSec(startBeat, bpmFactor);
                 const endTime = beatToSec(endBeat, bpmFactor);
-                const startValue = speedAtBeat(startBeat) / 10 / secondsPerBeat;
-                const endValue = speedAtBeat(endBeat) / 10 / secondsPerBeat;
+                // Lchzh Phigros の速度モデルは Y/s。
+                // RPE の標準速度 10 は 1 Y/s に相当するため、BPMで再度割ったり掛けたりしない。
+                // BPM変化とbpmfactorは beatToSec() が秒へ変換する段階で反映済み。
+                const startValue = speedAtBeat(startBeat) / 10;
+                const endValue = speedAtBeat(endBeat) / 10;
                 speedEvents.push({ startTime, endTime, value: startValue, endValue: endValue, floorPosition });
-                floorPosition += (endBeat - startBeat) * (speedAtBeat(startBeat) + speedAtBeat(endBeat)) / 20;
+                // 速度はイベント内で線形変化するため、秒基準で台形積分して累積Y位置を求める。
+                floorPosition += (endTime - startTime) * (startValue + endValue) / 2;
             }
-            if (!speedEvents.length) speedEvents.push({ startTime: 0, endTime: 999999, value: bpmEvents[0].bpm / (600 * bpmFactor), endValue: bpmEvents[0].bpm / (600 * bpmFactor), floorPosition: 0 });
+            if (!speedEvents.length) speedEvents.push({ startTime: 0, endTime: 999999, value: 1, endValue: 1, floorPosition: 0 });
 
             const notes = [];
             (Array.isArray(rawLine.notes) ? rawLine.notes : []).forEach((rawNote, noteIdx) => {
@@ -1651,8 +1653,10 @@ class ChartParser {
                 const endTime = noteType === 3
                     ? beatToSec(beatValue(rawNote.endTime), bpmFactor)
                     : hitTime;
-                const floorPos = this.calcFloorPosition(speedEvents, hitTime);
-                const endFloorPos = noteType === 3 ? this.calcFloorPosition(speedEvents, endTime) : floorPos;
+                const noteSpeed = Math.max(0, safeNum(rawNote.speed, 1));
+                const noteYOffset = safeNum(rawNote.yOffset, 0) * noteSpeed;
+                const floorPos = this.calcFloorPosition(speedEvents, hitTime) + noteYOffset;
+                const endFloorPos = noteType === 3 ? this.calcFloorPosition(speedEvents, endTime) + noteYOffset : floorPos;
                 notes.push({
                     id: `${lineIdx}_${noteIdx}`,
                     type: noteType,
@@ -1660,7 +1664,7 @@ class ChartParser {
                     holdTime: Math.max(0, endTime - hitTime),
                     endTime: Math.max(hitTime, endTime),
                     positionX: safeNum(rawNote.positionX, 0) / 1350,
-                    speed: Math.max(0, safeNum(rawNote.speed, 1)),
+                    speed: noteSpeed,
                     isHoldLengthSpeed: false,
                     floorPosition: floorPos,
                     endFloorPosition: endFloorPos,
